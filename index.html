@@ -1,0 +1,1011 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>健康記錄</title>
+<!-- iOS standalone (native-like fullscreen) -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="健康記錄">
+<meta name="theme-color" content="#F5EFE7">
+<link rel="apple-touch-icon" href="./icon.png">
+<link rel="manifest" href="./manifest.json">
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.26.4/babel.min.js"></script>
+<style>
+  html,body{margin:0;padding:0;background:#F5EFE7}
+  body{padding-top:env(safe-area-inset-top)}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef, useMemo, useCallback } = React;
+
+/* ============ design tokens (from Claude Design handoff) ============ */
+const A = "#5A9B7C";                 // accent green
+const ORANGE = "#E79A6B";            // week-3 / back-off accent
+const OVER = "#D2795A";              // over-target
+const OVER_BG = "#F6E4DA";
+const INK = "#373737";
+const MUTED = "#B5A38F";
+const SUB = "#5F574D";
+const CELL_BG = "#EAE3D8";
+const BTN_BG = "#EFE8DE";
+const SOFT = "#F6F0E8";
+const BORDER = "#E6DED1";
+const APP_BG = "#F5EFE7";
+const PAGE_BG = "#C7B9A5";
+const MONO = "ui-monospace, SFMono-Regular, Menlo, monospace";
+
+const STEP_GOAL = 8000;
+const WATER_GOAL = 3000;
+const WATER_CELL = 300;
+
+const CATS = [
+  { key: "carb", name: "碳水", emoji: "🍚" },
+  { key: "protein", name: "蛋白質", emoji: "🍗" },
+  { key: "dairy", name: "乳製品", emoji: "🥛" },
+  { key: "fruit", name: "水果", emoji: "🍎" },
+  { key: "veg", name: "蔬菜", emoji: "🥦" },
+  { key: "whey", name: "乳清", emoji: "🥤" },
+  { key: "fat", name: "油脂", emoji: "🥑" },
+];
+const TRAIN = { carb: 8, protein: 9, dairy: 1, fruit: 1, veg: 4, whey: 1, fat: 6 };
+const REST = { carb: 5, protein: 10, dairy: 1, fruit: 1, veg: 4, whey: 1, fat: 5 };
+
+/* g2s = grams per 1 serving (from nutritionist exchange table) */
+const FOODS = [
+  { e: "🍚", n: "米糊", c: "carb", g2s: 20 },
+  { e: "🍠", n: "地瓜", c: "carb", g2s: 55 },
+  { e: "🍙", n: "飯糰", c: "carb", g2s: 62 },
+  { e: "🍗", n: "雞胸肉", c: "protein", g2s: 30 },
+  { e: "🥚", n: "蛋", c: "protein", g2s: 55 },
+  { e: "🫘", n: "豆漿", c: "protein", g2s: 190 },
+  { e: "🥦", n: "蔬菜", c: "veg", g2s: 100 },
+  { e: "🥜", n: "花生醬", c: "fat", g2s: 10 },
+  { e: "🫒", n: "橄欖油", c: "fat", g2s: 5 },
+  { e: "🧴", n: "亞麻仁油", c: "fat", g2s: 5 },
+  { e: "🥛", n: "牛奶", c: "dairy", g2s: 240 },
+  { e: "🥤", n: "乳清", c: "whey", g2s: 30 },
+];
+
+/* one-tap meal combos (serv pre-computed from exchange table) */
+const COMBOS = [
+  { emojis: ["🍚", "🥚", "🫘", "🥜"], label: "米糊40＋蛋1＋豆漿200＋花生醬20", items: [
+    { e: "🍚", n: "米糊", c: "carb", serv: 2, amount: 40, unit: "克" },
+    { e: "🥚", n: "蛋", c: "protein", serv: 1, amount: 1, unit: "份" },
+    { e: "🫘", n: "豆漿", c: "protein", serv: 1, amount: 200, unit: "克" },
+    { e: "🥜", n: "花生醬", c: "fat", serv: 2, amount: 20, unit: "克" },
+  ]},
+  { emojis: ["🍗", "🥦"], label: "雞胸肉90＋蔬菜200", items: [
+    { e: "🍗", n: "雞胸肉", c: "protein", serv: 3, amount: 90, unit: "克" },
+    { e: "🥦", n: "蔬菜", c: "veg", serv: 2, amount: 200, unit: "克" },
+  ]},
+  { emojis: ["🍌", "🥛", "🥜"], label: "香蕉0.5份＋牛奶240＋花生醬20", items: [
+    { e: "🍌", n: "香蕉", c: "fruit", serv: 0.5, amount: 0.5, unit: "份" },
+    { e: "🥛", n: "牛奶", c: "dairy", serv: 1, amount: 240, unit: "克" },
+    { e: "🥜", n: "花生醬", c: "fat", serv: 2, amount: 20, unit: "克" },
+  ]},
+];
+
+const PLAN_DAYS = [
+  { day: "Day 1", focus: "肩背胸", items: [
+    { i: 1, n: "T bar 划船", tags: ["機械"], s: "10～12 / 10～12 / 8～10 *2" },
+    { i: 2, n: "史密斯上胸推", tags: ["椅墊 45°"], s: "10～12 / 10～12 / 8～10 *3/3/2" },
+    { i: 3, n: "寬對握引體向上", tags: ["1.5 倍肩寬", "闊背上端、下斜方"], s: "12～15 / 10～12 / 10～12 *2" },
+    { i: 4, n: "對握機械肩推", tags: [], s: "10～12 / 10～12 / 8～10 *3/3/2" },
+    { i: 5, n: "高跪姿單手 cable 划船", tags: ["水平拉", "闊背、後三角"], s: "10～15 *2" },
+    { i: 6, n: "hammer 槓片雙手斜下拉", tags: ["VV 把手"], s: "10～15 *2" },
+    { i: 7, n: "機械側平舉", tags: ["側束前端"], s: "10～15 *4" },
+  ]},
+  { day: "Day 2", focus: "腿肩", items: [
+    { i: 1, n: "史密斯深蹲", tags: [], s: "8～10 / 8～10 / 6～8 *2" },
+    { i: 2, n: "啞鈴 RDL", tags: [], s: "10～12 / 10～12 / 8～10 *2" },
+    { i: 3, n: "後腳抬高蹲", tags: [], s: "10～12 / 10～12 / 8～10 *2" },
+    { i: 4, n: "Cable 側平舉", tags: [], s: "10～12 *4" },
+    { i: 5, n: "坐姿腿後勾 + 站姿錘式二頭彎舉", tags: ["超級組"], s: "10～15 *3" },
+    { i: 6, n: "反向飛鳥", tags: ["後三角、斜方肌"], s: "10～15 *3" },
+  ]},
+  { day: "Day 3", focus: "肩背", items: [
+    { i: 1, n: "輔助引體向上", tags: ["1 倍肩寬握"], s: "10～12 / 10～12 / 8～10 *3/3/2" },
+    { i: 2, n: "啞鈴 / 史密斯肩推", tags: ["椅墊 75°"], s: "10～12 / 10～12 / 8～10 *3/3/2" },
+    { i: 3, n: "坐姿槓片式單手反手下拉", tags: ["高跪姿單手 cable 斜下拉"], s: "10～12 *2" },
+    { i: 4, n: "機械肩推", tags: [], s: "10～12 *2" },
+    { i: 5, n: "cable 側平舉", tags: ["側束後端"], s: "10～12 *4" },
+    { i: 6, n: "寬對握坐姿 cable 划船", tags: ["大圓、斜方"], s: "12～15 *2" },
+  ]},
+  { day: "Day 4", focus: "腿肩", items: [
+    { i: 1, n: "窄相撲硬舉", tags: [], s: "8～10 / 8～10 / 6～8 *2" },
+    { i: 2, n: "槓鈴 / 史密斯臀推", tags: [], s: "10～12 / 10～12 / 8～10 *2" },
+    { i: 3, n: "單腳 RDL", tags: [], s: "10～12 *2" },
+    { i: 4, n: "娘娘蹲", tags: [], s: "10～12 *2" },
+    { i: 5, n: "cable 後三角划船", tags: [], s: "10～12 *4" },
+    { i: 6, n: "cable 三頭下壓", tags: [], s: "10～15 *2" },
+  ]},
+];
+
+/* ============ helpers ============ */
+const fmt = (n) => { n = Math.round(n * 2) / 2; return Number.isInteger(n) ? "" + n : n.toFixed(1); };
+const pad2 = (n) => String(n).padStart(2, "0");
+const keyOf = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+const todayKey = () => keyOf(new Date());
+const nowTime = () => { const d = new Date(); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
+const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
+
+const parseScheme = (str) => {
+  const parts = String(str).split("*");
+  const norm = (arr) => (arr.length >= 3 ? arr.slice(0, 3) : [arr[0], arr[0], arr[0]]);
+  const reps = norm(parts[0].trim().split("/").map((x) => x.trim()));
+  const sets = norm((parts[1] || "1").trim().split("/").map((x) => x.trim()));
+  return [0, 1, 2].map((i) => ({ reps: reps[i], sets: sets[i] }));
+};
+
+const emptyDaily = () => ({
+  weight: "", sleep: "", steps: "", bowel: 0, water: 0,
+  cardioDone: false, cardioMin: "30", meals: [],
+});
+
+const DEFAULT_STATE = {
+  dayKey: todayKey(), dayType: "training",
+  ...emptyDaily(),
+  mealType: "早餐", mealTime: "", foodUnit: "份", foodAmt: 1,
+  customName: "", customServ: 1, customCat: "protein", customUnit: "份",
+  planWeek: 1, planDay: 0,
+  measure: { hip: "", navelMid: "", navelUp: "", navelDown: "", gripR: "", gripL: "" },
+  weekSummary: "",
+  gasUrl: "", uploadedThrough: "", lastUploadWeek: "", lastUploadAt: "",
+  history: {},
+};
+
+const KEY = "ios_health_v1";
+async function loadState() {
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (raw) {
+      const saved = JSON.parse(raw);
+      let st = { ...DEFAULT_STATE, ...saved };
+      // day rollover: archive yesterday's daily fields, reset for the new day
+      if (st.dayKey !== todayKey()) {
+        const h = { ...st.history };
+        h[st.dayKey] = {
+          ...(h[st.dayKey] || {}),
+          weight: parseFloat(st.weight) || (h[st.dayKey] || {}).weight || null,
+          sleep: parseFloat(st.sleep) || null,
+          steps: parseInt(st.steps) || null,
+          water: st.water || 0,
+          bowel: st.bowel || 0,
+          cardio: st.cardioDone ? (parseInt(st.cardioMin) || 30) : 0,
+          dayType: st.dayType,
+          train: st.dayType === "training" ? (PLAN_DAYS[st.planDay || 0].focus + (st.cardioDone ? "+" + (st.cardioMin || 30) + "有氧" : "")) : "休息",
+          meals: st.meals || [],
+        };
+        st = { ...st, history: h, dayKey: todayKey(), ...emptyDaily() };
+      }
+      // retention: keep at most ~3 months (92 days) on device
+      const cutoff = keyOf(new Date(Date.now() - 92 * 86400000));
+      const hh = { ...st.history };
+      let pruned = false;
+      Object.keys(hh).forEach((k) => { if (k < cutoff) { delete hh[k]; pruned = true; } });
+      if (pruned) st = { ...st, history: hh };
+      return st;
+    }
+  } catch (e) { /* first run */ }
+  return { ...DEFAULT_STATE };
+}
+async function saveState(st) {
+  try { localStorage.setItem(KEY, JSON.stringify(st)); }
+  catch (e) { console.error("save failed", e); }
+}
+
+/* ============ cell-grid primitives (signature tally style) ============ */
+function CellRow({ cells }) {
+  // insert dashed divider after every 5 cells within each row of 10
+  const rows = [];
+  for (let r = 0; r < cells.length; r += 10) {
+    const chunk = cells.slice(r, r + 10);
+    const items = [];
+    chunk.forEach((cell, i) => {
+      items.push(<Cell key={"c" + r + i} {...cell} />);
+      if ((i + 1) % 5 === 0 && i + 1 < chunk.length)
+        items.push(<div key={"d" + r + i} style={{ width: 0, height: 20, flex: "none", borderLeft: `1px dashed ${MUTED}`, margin: "0 2px" }} />);
+    });
+    rows.push(<div key={"r" + r} style={{ display: "flex", alignItems: "center", gap: 4 }}>{items}</div>);
+  }
+  return <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>{rows}</div>;
+}
+function Cell({ frac = 0, over = false, transparent = false, label = null }) {
+  if (transparent) return <div style={{ width: 20, height: 20, flex: "none", borderRadius: 5, background: "transparent" }} />;
+  return (
+    <div style={{ width: 20, height: 20, flex: "none", borderRadius: 5, background: over ? OVER_BG : CELL_BG, overflow: label ? "visible" : "hidden", position: "relative" }}>
+      {label && (
+        <span style={{ position: "absolute", right: "calc(100% + 6px)", top: "50%", transform: "translateY(-50%)", whiteSpace: "nowrap", fontSize: 13, fontWeight: 600, color: INK, display: "flex", alignItems: "center", gap: 5, pointerEvents: "none" }}>
+          <span style={{ fontSize: 15 }}>{label.emoji}</span>{label.name}
+        </span>
+      )}
+      <div style={{ width: `${Math.max(0, Math.min(1, frac)) * 100}%`, height: "100%", background: over ? OVER : A, borderRadius: label ? 5 : 0 }} />
+    </div>
+  );
+}
+
+/* ============ charts (SVG, per design) ============ */
+function EmptyChart() {
+  return (
+    <div style={{ height: 150, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, color: PAGE_BG, fontSize: 13, background: SOFT, borderRadius: 12 }}>
+      <div style={{ fontSize: 26 }}>📊</div>
+      <div>尚無資料，開始記錄後顯示</div>
+    </div>
+  );
+}
+function LineChart({ series, unit }) {
+  const pts = series.filter((p) => p.val != null);
+  if (pts.length === 0) return <EmptyChart />;
+  const W = 322, H = 150, pad = 26, pb = 22;
+  let mn = Math.min(...pts.map((p) => p.val)), mx = Math.max(...pts.map((p) => p.val));
+  if (mn === mx) { mn -= 1; mx += 1; }
+  const rng = mx - mn;
+  const idx = series.map((p, i) => ({ p, i })).filter((o) => o.p.val != null);
+  const X = (i) => (idx.length === 1 ? W / 2 : pad + (i / 13) * (W - pad - 8));
+  const Y = (v) => H - pb - ((v - mn) / rng) * (H - pad - pb);
+  const d = idx.map((o, k) => (k ? "L" : "M") + X(o.i) + " " + Y(o.p.val)).join(" ");
+  const last = idx[idx.length - 1];
+  return (
+    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: "block" }}>
+      <line x1={pad} y1={H - pb} x2={W - 4} y2={H - pb} stroke="#eceef2" strokeWidth={1} />
+      {idx.length > 1 && <path d={d} fill="none" stroke={A} strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" />}
+      {idx.map((o, k) => <circle key={k} cx={X(o.i)} cy={Y(o.p.val)} r={3.5} fill="#fff" stroke={A} strokeWidth={2.4} />)}
+      <text x={X(last.i)} y={Y(last.p.val) - 9} fontSize={11} fontWeight={700} fill={A} textAnchor="middle">{fmt(last.p.val) + unit}</text>
+    </svg>
+  );
+}
+function BarChart({ series, goal }) {
+  if (!series.some((p) => p.val != null)) return <EmptyChart />;
+  const W = 322, H = 150, pad = 6, pb = 18;
+  let mx = Math.max(goal || 0, ...series.map((p) => p.val || 0)); if (mx <= 0) mx = 1; mx *= 1.1;
+  const bw = (W - pad * 2) / 14;
+  const gy = goal ? H - pb - (goal / mx) * (H - pb - 10) : null;
+  return (
+    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: "block" }}>
+      {goal && (<>
+        <line x1={pad} y1={gy} x2={W - pad} y2={gy} stroke={OVER} strokeWidth={1.2} strokeDasharray="4 4" />
+        <text x={W - pad} y={gy - 4} fontSize={9} fill={OVER} textAnchor="end">目標</text>
+      </>)}
+      {series.map((p, i) => {
+        const v = p.val || 0; const bh = (v / mx) * (H - pb - 10); const met = goal && v >= goal;
+        return <rect key={i} x={pad + i * bw + 2} y={H - pb - bh} width={bw - 4} height={Math.max(0, bh)} rx={3} fill={v ? (met ? A : A + "99") : "#eceef2"} />;
+      })}
+      <line x1={pad} y1={H - pb} x2={W - pad} y2={H - pb} stroke="#eceef2" strokeWidth={1} />
+    </svg>
+  );
+}
+
+/* ============ shared styles ============ */
+const card = { background: "#fff", borderRadius: 16, padding: 16, margin: "0 0 14px" };
+const secLabel = { fontSize: 12, color: MUTED, fontWeight: 600, marginBottom: 10 };
+const titleStyle = { fontSize: 28, fontWeight: 800, color: INK, letterSpacing: "-.02em" };
+const inputBase = { border: `1px solid ${BORDER}`, borderRadius: 10, padding: "9px 11px", fontSize: 15, fontWeight: 600, color: INK, background: "#fff", fontFamily: "inherit" };
+const chip = (a) => ({ flex: 1, padding: "9px 2px", borderRadius: 20, fontSize: 13, fontWeight: 600, border: "none", cursor: "pointer", whiteSpace: "nowrap", textAlign: "center", background: a ? A : BTN_BG, color: a ? "#fff" : SUB });
+const segBtn = (a) => ({ padding: "8px 14px", borderRadius: 9, fontSize: 13, fontWeight: 700, border: "none", cursor: "pointer", whiteSpace: "nowrap", background: a ? "#fff" : "transparent", color: a ? INK : MUTED, boxShadow: a ? "0 1px 3px rgba(0,0,0,.12)" : "none" });
+const unitBtn = (a) => ({ padding: "8px 11px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 13, fontWeight: 700, background: a ? "#fff" : "transparent", color: a ? INK : MUTED, boxShadow: a ? "0 1px 2px rgba(0,0,0,.12)" : "none" });
+const bigInput = { width: "100%", border: "none", fontSize: 24, fontWeight: 800, color: INK, background: "transparent", padding: 0, fontFamily: "inherit" };
+const stepperBtn = { width: 30, height: 30, borderRadius: 15, border: "none", background: BTN_BG, color: A, fontSize: 18, fontWeight: 600, cursor: "pointer", lineHeight: 1, flex: "none" };
+function MetricCard({ emoji, label, children }) {
+  return (
+    <div style={{ background: "#fff", borderRadius: 16, padding: 12, height: 96, display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+      <div style={{ fontSize: 11.5, color: MUTED, fontWeight: 600 }}>{emoji} {label}</div>
+      {children}
+    </div>
+  );
+}
+
+/* ============ App ============ */
+function App() {
+  const [st, setSt] = useState(null);
+  const [tab, setTab] = useState("today");
+  const [toastMsg, setToastMsg] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const autoUpRef = useRef(false);
+  const doUploadRef = useRef(null);
+  const saveTimer = useRef(null);
+  const toastTimer = useRef(null);
+
+  useEffect(() => {
+    loadState().then((s) => {
+      if (!s.mealTime) s.mealTime = nowTime();
+      setSt(s);
+      saveState(s);
+    });
+  }, []);
+
+  const update = useCallback((patch) => {
+    setSt((prev) => {
+      const next = typeof patch === "function" ? patch(prev) : { ...prev, ...patch };
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      saveTimer.current = setTimeout(() => saveState(next), 500);
+      return next;
+    });
+  }, []);
+  const toast = (msg) => {
+    setToastMsg(msg);
+    clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToastMsg(""), 1600);
+  };
+  const patchHist = (s, patch) => {
+    const h = { ...s.history };
+    h[s.dayKey] = { ...(h[s.dayKey] || {}), ...patch };
+    return h;
+  };
+
+  const consumed = useMemo(() => {
+    const n = Object.fromEntries(CATS.map((c) => [c.key, 0]));
+    if (st) st.meals.forEach((m) => CATS.forEach((c) => { n[c.key] += m.portions[c.key] || 0; }));
+    return n;
+  }, [st]);
+
+  useEffect(() => {
+    if (!st || autoUpRef.current || !st.gasUrl) return;
+    const ws = new Date(); ws.setDate(ws.getDate() - ws.getDay());
+    if (keyOf(ws) !== st.lastUploadWeek) {
+      autoUpRef.current = true;
+      setTimeout(() => { doUploadRef.current && doUploadRef.current(true); }, 800);
+    }
+  }, [st]);
+
+  if (!st) return (
+    <div style={{ minHeight: "100vh", background: APP_BG, display: "flex", alignItems: "center", justifyContent: "center", color: MUTED, fontFamily: `-apple-system,BlinkMacSystemFont,'PingFang TC',system-ui,sans-serif` }}>
+      載入中…
+    </div>
+  );
+
+  const isT = st.dayType === "training";
+  const tg = isT ? TRAIN : REST;
+  const now = new Date();
+
+  /* ---------- meal ops ---------- */
+  const addFood = (f) => {
+    const val = parseFloat(st.foodAmt) || 0;
+    if (val <= 0) return;
+    const unit = st.foodUnit;
+    const serv = unit === "克" ? Math.round((val / f.g2s) * 2) / 2 : val;
+    const portions = Object.fromEntries(CATS.map((c) => [c.key, 0]));
+    portions[f.c] = serv;
+    const entry = { id: Date.now() + Math.random().toString(36).slice(2, 5), type: st.mealType, time: st.mealTime || nowTime(), name: f.n, emoji: f.e, portions, amount: val, unit };
+    update((s) => ({ ...s, meals: [entry, ...s.meals] }));
+    toast(`已加入 ${f.e} ${f.n}　${val} ${unit}`);
+  };
+  const addCustom = () => {
+    if (!st.customName.trim()) return;
+    const cat = CATS.find((c) => c.key === st.customCat);
+    const unit = st.customUnit;
+    const serv = unit === "克" ? Math.round((st.customServ / 100) * 2) / 2 : st.customServ;
+    const portions = Object.fromEntries(CATS.map((c) => [c.key, 0]));
+    portions[st.customCat] = serv;
+    const entry = { id: Date.now() + Math.random().toString(36).slice(2, 5), type: st.mealType, time: st.mealTime || nowTime(), name: st.customName.trim(), emoji: cat.emoji, portions, amount: st.customServ, unit };
+    update((s) => ({ ...s, meals: [entry, ...s.meals], customName: "" }));
+    toast(`已加入 ${st.customName.trim()}`);
+  };
+  const delMeal = (m) => update((s) => ({ ...s, meals: s.meals.filter((x) => x.id !== m.id) }));
+  const addCombo = (combo) => {
+    const time = st.mealTime || nowTime();
+    const entries = combo.items.map((it) => {
+      const portions = Object.fromEntries(CATS.map((c) => [c.key, 0]));
+      portions[it.c] = it.serv;
+      return { id: Date.now() + Math.random().toString(36).slice(2, 6), type: st.mealType, time, name: it.n, emoji: it.e, portions, amount: it.amount, unit: it.unit };
+    });
+    update((s) => ({ ...s, meals: [...entries.reverse(), ...s.meals] }));
+    toast(`已加入組合（${combo.items.length} 項）`);
+  };
+
+  /* ---------- weekly cloud upload (Google Apps Script) ---------- */
+  const buildPendingDays = () => Object.keys(st.history)
+    .filter((k) => k < st.dayKey && k > (st.uploadedThrough || ""))
+    .sort();
+  const doUpload = async (auto) => {
+    if (!st.gasUrl) { if (!auto) toast("請先貼上 Apps Script 網址"); return; }
+    const keys = buildPendingDays();
+    if (!keys.length) { if (!auto) toast("沒有待上傳的資料"); return; }
+    setUploading(true);
+    const abbr = { 早餐: "早", 午餐: "午", 晚餐: "晚", 加餐: "加餐", 訓前: "訓前", 訓後: "訓後" };
+    const days = keys.map((k) => {
+      const h = st.history[k] || {};
+      const d = new Date(k + "T00:00:00");
+      const groups = {}, order = [];
+      (h.meals || []).slice().reverse().forEach((m) => {
+        const gk = m.time + "|" + m.type;
+        if (!groups[gk]) { groups[gk] = { time: m.time, type: m.type, items: [], p: Object.fromEntries(CATS.map((c) => [c.key, 0])) }; order.push(gk); }
+        groups[gk].items.push(m.amount != null ? m.name + fmt(m.amount) + (m.unit === "克" ? "" : "份") : m.name);
+        CATS.forEach((c) => { groups[gk].p[c.key] += m.portions[c.key] || 0; });
+      });
+      order.sort((a, b) => (groups[a].time || "").localeCompare(groups[b].time || ""));
+      const meals = order.map((gk) => {
+        const g = groups[gk];
+        return { time: g.time, type: abbr[g.type] || g.type, desc: g.items.join("、"),
+          carb: g.p.carb, protein: g.p.protein, dairy: g.p.dairy, fruit: g.p.fruit, veg: g.p.veg, whey: g.p.whey, fat: g.p.fat };
+      });
+      return { date: k, weekday: WEEKDAYS[d.getDay()], weight: h.weight ?? "", water: h.water ?? "", steps: h.steps ?? "",
+        sleep: h.sleep ?? "", bowel: h.bowel ?? 0, cardioDone: (h.cardio || 0) > 0, cardioMin: h.cardio || "",
+        training: h.train || "", meals };
+    });
+    try {
+      const res = await fetch(st.gasUrl, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ days }) });
+      const j = await res.json();
+      if (j && j.ok) {
+        const ws = new Date(); ws.setDate(ws.getDate() - ws.getDay());
+        const at = new Date();
+        update({ uploadedThrough: keys[keys.length - 1], lastUploadWeek: keyOf(ws),
+          lastUploadAt: `${at.getMonth() + 1}/${at.getDate()} ${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}` });
+        toast(`☁️ 已上傳 ${keys.length} 天資料`);
+      } else throw new Error("bad response");
+    } catch (e) {
+      console.error(e);
+      toast("上傳失敗，資料仍保留在本機");
+    }
+    setUploading(false);
+  };
+  doUploadRef.current = doUpload;
+
+  /* ---------- reports ---------- */
+  const buildReport = () => {
+    const L = [];
+    L.push(`${now.getMonth() + 1}/${now.getDate()}（${WEEKDAYS[now.getDay()]}）`);
+    L.push(`體重：${st.weight || "—"}`);
+    L.push(`水量：水${st.water}`);
+    L.push(`步數：${st.steps || 0}`);
+    const focus = PLAN_DAYS[st.planDay || 0].focus;
+    const train = isT ? `${focus}${st.cardioDone ? `+${st.cardioMin || 30}有氧` : ""}` : "休息";
+    L.push(`訓練：${train}`);
+    L.push(`睡眠：${st.sleep || "—"}小時`);
+    L.push(`排便：${st.bowel}次`);
+    const abbr = { 早餐: "早", 午餐: "午", 晚餐: "晚", 加餐: "加餐", 訓前: "訓前", 訓後: "訓後" };
+    const groups = {}, order = [];
+    st.meals.slice().reverse().forEach((m) => {
+      const k = m.time + "|" + m.type;
+      if (!groups[k]) { groups[k] = { time: m.time, type: m.type, items: [] }; order.push(k); }
+      groups[k].items.push(m.amount != null ? m.name + fmt(m.amount) + (m.unit === "克" ? "" : m.unit === "份" ? "份" : m.unit) : m.name);
+    });
+    order.sort((a, b) => (groups[a].time || "").localeCompare(groups[b].time || ""));
+    order.forEach((k) => { const g = groups[k]; L.push(`${g.time} ${abbr[g.type] || g.type}：${g.items.join("、")}`); });
+    return L.join("\n");
+  };
+  const buildWeekReport = () => {
+    const m = st.measure; const L = []; let sum = 0, c = 0;
+    const ws = new Date(now); ws.setDate(now.getDate() - now.getDay()); // Sunday = week start
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(ws); d.setDate(ws.getDate() + i);
+      const k = keyOf(d);
+      const v = k === st.dayKey ? (parseFloat(st.weight) || null) : (st.history[k]?.weight ?? null);
+      L.push(`${d.getMonth() + 1}/${d.getDate()}：${v != null ? fmt(v) : "—"}`);
+      if (v != null) { sum += v; c++; }
+    }
+    L.push(`七日平均體重：${c ? (sum / c).toFixed(2) : "—"}`);
+    L.push(`臀圍：${m.hip || "—"}`);
+    L.push(`肚臍正中間：${m.navelMid || "—"}`);
+    L.push(`肚臍上五公分：${m.navelUp || "—"}`);
+    L.push(`肚臍下五公分：${m.navelDown || "—"}`);
+    L.push("握力⬇️");
+    L.push(`右手：${m.gripR || "—"}`);
+    L.push(`左手：${m.gripL || "—"}`);
+    L.push("本週的計劃執行狀況（睡眠、精神、飲食與訓練）");
+    L.push(st.weekSummary || "");
+    return L.join("\n");
+  };
+  const buildTSV = () => {
+    const h = ["日期", "類型", "體重", "睡眠", "步數", "飲水", "排便"];
+    const v = [st.dayKey, isT ? "訓練日" : "休息日", st.weight || "", st.sleep || "", st.steps || "", st.water, st.bowel];
+    CATS.forEach((c) => { h.push(c.name); v.push(fmt(consumed[c.key] || 0) + "/" + tg[c.key]); });
+    return h.join("\t") + "\n" + v.join("\t");
+  };
+  const copy = (text, label) => {
+    const done = () => toast(label);
+    try { navigator.clipboard.writeText(text).then(done, done); } catch (e) { done(); }
+  };
+
+  /* ---------- series ---------- */
+  const seriesFor = (field) => {
+    const out = [];
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date(now); d.setDate(now.getDate() - i);
+      const k = keyOf(d);
+      let val = st.history[k]?.[field] ?? null;
+      if (k === st.dayKey) {
+        if (field === "weight") val = parseFloat(st.weight) || val;
+        if (field === "steps") val = parseInt(st.steps) || val;
+        if (field === "water") val = st.water || val;
+      }
+      out.push({ label: `${d.getMonth() + 1}/${d.getDate()}`, val });
+    }
+    return out;
+  };
+
+  /* ---------- nutrition grid data ---------- */
+  const buildCatCells = (key) => {
+    const cur = consumed[key] || 0; const t = tg[key];
+    const len = Math.max(t, Math.ceil(cur)) || 1;
+    const cells = [];
+    for (let i = 0; i < len; i++) cells.push({ frac: cur - i, over: i >= t });
+    return cells;
+  };
+  const mk = (key, withLabel) => {
+    const c = CATS.find((x) => x.key === key);
+    const cur = consumed[key] || 0; const t = tg[key];
+    return { frac: Math.min(1, cur), over: cur > t, label: withLabel ? { emoji: c.emoji, name: c.name } : null };
+  };
+  const secRow = [mk("dairy", false), { transparent: true }, { transparent: true }, { transparent: true }, mk("fruit", true), { gap: true }, { transparent: true }, { transparent: true }, { transparent: true }, mk("whey", true)];
+
+  /* ---------- water cells ---------- */
+  const wTarget = Math.ceil(WATER_GOAL / WATER_CELL);
+  const wFilled = Math.floor(st.water / WATER_CELL);
+  const waterCells = []; for (let i = 0; i < wTarget; i++) waterCells.push({ frac: i < wFilled ? 1 : 0, over: false });
+
+  /* ---------- plan derived ---------- */
+  const planWeek = st.planWeek || 1;
+  const planDay = st.planDay || 0;
+  const curDay = PLAN_DAYS[planDay];
+  const curItems = curDay.items.map((ex) => {
+    const p = parseScheme(ex.s)[planWeek - 1];
+    const backOff = p.sets === "3";
+    const tags = (ex.tags || []).reduce((a, t) => a.concat(String(t).split("、")), []).map((x) => x.trim()).filter(Boolean);
+    return { ...ex, tags, schemeLabel: `${p.reps} 下 × ${p.sets} 組`, backOff };
+  });
+  const weekBtnStyle = (w) => ({ flex: 1, padding: "9px 2px", borderRadius: 10, fontSize: 13, fontWeight: 700, border: "none", cursor: "pointer", background: planWeek === w ? (w === 3 ? ORANGE : A) : BTN_BG, color: planWeek === w ? "#fff" : SUB });
+  const dayBtnStyle = (idx) => ({ flex: 1, padding: "9px 2px", borderRadius: 10, fontSize: 13, fontWeight: 700, border: "none", cursor: "pointer", background: planDay === idx ? (planWeek === 3 ? ORANGE : A) : BTN_BG, color: planDay === idx ? "#fff" : SUB });
+
+  /* ---------- misc derived ---------- */
+
+  const lastWeight = (() => {
+    const ds = Object.keys(st.history).filter((k) => k < st.dayKey && st.history[k]?.weight != null).sort();
+    return ds.length ? st.history[ds[ds.length - 1]].weight : null;
+  })();
+  const sleepMet = (parseFloat(st.sleep) || 0) >= 8;
+  const stepsNum = parseInt(st.steps) || 0;
+
+  const wl = seriesFor("weight").filter((p) => p.val != null);
+  const weightLatest = wl.length ? fmt(wl[wl.length - 1].val) + " kg" : "尚無資料";
+
+  const weekWeights = [];
+  { let sum = 0, c = 0;
+    const ws = new Date(now); ws.setDate(now.getDate() - now.getDay()); // Sunday = week start
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(ws); d.setDate(ws.getDate() + i); const k = keyOf(d);
+      const v = k === st.dayKey ? (parseFloat(st.weight) || null) : (st.history[k]?.weight ?? null);
+      weekWeights.push({ date: `${d.getMonth() + 1}/${d.getDate()}`, val: v != null ? fmt(v) : "—" });
+      if (v != null) { sum += v; c++; }
+    }
+    weekWeights.avg = c ? (sum / c).toFixed(2) + " kg" : "—";
+  }
+
+  const measDefs = [["hip", "臀圍 cm"], ["navelMid", "肚臍正中間 cm"], ["navelUp", "肚臍上五公分 cm"], ["navelDown", "肚臍下五公分 cm"], ["gripR", "握力右手 kg"], ["gripL", "握力左手 kg"]];
+
+  /* ============ render ============ */
+  return (
+    <div style={{ minHeight: "100vh", background: PAGE_BG, fontFamily: `-apple-system,BlinkMacSystemFont,'PingFang TC','Heiti TC','Microsoft JhengHei',system-ui,sans-serif`, WebkitFontSmoothing: "antialiased" }}>
+      <style>{`
+        input:focus,select:focus,textarea:focus{outline:none}
+        ::-webkit-scrollbar{width:0;height:0}
+        input::-webkit-outer-spin-button,input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+        @keyframes toastIn{from{opacity:0;transform:translate(-50%,12px)}to{opacity:1;transform:translate(-50%,0)}}
+      `}</style>
+      <div style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: APP_BG, position: "relative" }}>
+        {/* scroll content */}
+        <div style={{ padding: "14px 16px 120px" }}>
+
+          {/* ===================== 今日 ===================== */}
+          {tab === "today" && (
+            <div>
+              <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", margin: "6px 2px 16px" }}>
+                <div>
+                  <div style={titleStyle}>今日</div>
+                  <div style={{ fontSize: 13, color: MUTED, marginTop: 2 }}>{now.getMonth() + 1}月{now.getDate()}日 週{WEEKDAYS[now.getDay()]}</div>
+                </div>
+                <div style={{ display: "flex", background: BORDER, borderRadius: 12, padding: 3 }}>
+                  <button onClick={() => update({ dayType: "training" })} style={segBtn(isT)}>🔥 訓練日</button>
+                  <button onClick={() => update({ dayType: "rest" })} style={segBtn(!isT)}>🌙 休息日</button>
+                </div>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 8, margin: "0 0 14px" }}>
+                <MetricCard emoji="😴" label="睡眠">
+                  <div>
+                    <input type="number" step="0.1" inputMode="decimal" value={st.sleep} placeholder="0" style={bigInput}
+                      onChange={(e) => update({ sleep: e.target.value })} />
+                    <div style={{ fontSize: 10.5, color: MUTED, fontWeight: 600 }}>/ 8 小時 {sleepMet ? "✓" : ""}</div>
+                  </div>
+                </MetricCard>
+                <MetricCard emoji="⚖️" label="體重">
+                  <div>
+                    <input type="number" step="0.1" inputMode="decimal" value={st.weight} placeholder="—" style={bigInput}
+                      onChange={(e) => update((s) => ({ ...s, weight: e.target.value, history: patchHist(s, { weight: parseFloat(e.target.value) || null }) }))} />
+                    <div style={{ fontSize: 10.5, color: MUTED, fontWeight: 600 }}>{lastWeight != null ? `上次 ${fmt(lastWeight)} kg` : "無上次紀錄"}</div>
+                  </div>
+                </MetricCard>
+                <MetricCard emoji="👟" label="步數">
+                  <div>
+                    <input type="number" inputMode="numeric" value={st.steps} placeholder="0" style={bigInput}
+                      onChange={(e) => update((s) => ({ ...s, steps: e.target.value, history: patchHist(s, { steps: parseInt(e.target.value) || null }) }))} />
+                    <div style={{ fontSize: 10.5, color: MUTED, fontWeight: 600 }}>/ {STEP_GOAL.toLocaleString()} 步 {stepsNum >= STEP_GOAL ? "🎉" : ""}</div>
+                  </div>
+                </MetricCard>
+                <MetricCard emoji="💩" label="排便次數">
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <button style={stepperBtn} onClick={() => update((s) => ({ ...s, bowel: Math.max(0, s.bowel - 1) }))}>−</button>
+                    <span style={{ fontSize: 24, fontWeight: 800, color: INK, fontVariantNumeric: "tabular-nums" }}>{st.bowel}</span>
+                    <button style={stepperBtn} onClick={() => update((s) => ({ ...s, bowel: s.bowel + 1 }))}>＋</button>
+                  </div>
+                </MetricCard>
+              </div>
+
+              {/* nutrition grid */}
+              <div style={{ ...card, borderRadius: 20 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "0 0 16px" }}>
+                  <div style={{ fontSize: 15, fontWeight: 600, color: INK }}>🍱 營養份數</div>
+                  <span style={{ fontSize: 12, color: MUTED, fontWeight: 700 }}>{isT ? "訓練日" : "休息日"}目標</span>
+                </div>
+                {["carb", "protein", "fat", "veg"].map((key) => {
+                  const c = CATS.find((x) => x.key === key);
+                  return (
+                    <div key={key} style={{ display: "flex", alignItems: "flex-start", gap: 8, margin: "0 0 12px" }}>
+                      <div style={{ width: 72, flex: "none", display: "flex", alignItems: "center", gap: 6, fontSize: 14, fontWeight: 600, color: INK, paddingTop: 1, whiteSpace: "nowrap" }}>
+                        <span style={{ fontSize: 16 }}>{c.emoji}</span>{c.name}
+                      </div>
+                      <div style={{ flex: 1 }}><CellRow cells={buildCatCells(key)} /></div>
+                    </div>
+                  );
+                })}
+                {/* secondary shared track: dairy / fruit / whey */}
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12 }}>
+                  <div style={{ width: 72, flex: "none", display: "flex", alignItems: "center", gap: 5, fontSize: 13, fontWeight: 600, color: INK, whiteSpace: "nowrap" }}>
+                    <span style={{ fontSize: 15 }}>🥛</span>乳製品
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    {secRow.map((cell, i) => cell.gap
+                      ? <div key={i} style={{ width: 0, height: 20, flex: "none", borderLeft: "1px solid transparent", margin: "0 2px" }} />
+                      : <Cell key={i} {...cell} />)}
+                  </div>
+                </div>
+              </div>
+
+              {/* water */}
+              <div style={{ ...card, borderRadius: 20, position: "relative" }}>
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 8, margin: "0 0 14px" }}>
+                  <div style={{ width: 72, flex: "none" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14, fontWeight: 600, color: INK, whiteSpace: "nowrap" }}><span style={{ fontSize: 16 }}>💧</span>飲水</div>
+                    <div style={{ fontSize: 11, color: MUTED, fontWeight: 700, marginTop: 4, fontVariantNumeric: "tabular-nums" }}>{st.water}ml</div>
+                  </div>
+                  <div style={{ flex: 1, paddingTop: 1 }}><CellRow cells={waterCells} /></div>
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  {[250, 500, 1000].map((a) => (
+                    <button key={a} onClick={() => update((s) => { const v = s.water + a; return { ...s, water: v, history: patchHist(s, { water: v }) }; })}
+                      style={{ flex: 1, padding: "11px 0", background: BTN_BG, border: "none", borderRadius: 12, fontSize: 14, fontWeight: 700, color: A, cursor: "pointer" }}>+{a}</button>
+                  ))}
+                  <button onClick={() => update((s) => ({ ...s, water: 0, history: patchHist(s, { water: 0 }) }))}
+                    style={{ width: 44, flex: "none", padding: "11px 0", background: BTN_BG, border: "none", borderRadius: 12, fontSize: 15, cursor: "pointer" }}>↺</button>
+                </div>
+              </div>
+
+              {/* today's training (training day only) */}
+              {isT && (
+                <div style={{ ...card, borderRadius: 20 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 15, fontWeight: 700, color: INK }}><span style={{ fontSize: 17 }}>🏋️</span>今日訓練</div>
+                    <button onClick={() => setTab("plan")} style={{ border: "none", background: "transparent", color: A, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>完整計畫 ›</button>
+                  </div>
+                  <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+                    {PLAN_DAYS.map((d, idx) => (
+                      <button key={idx} onClick={() => update({ planDay: idx })} style={dayBtnStyle(idx)}>Day {idx + 1}</button>
+                    ))}
+                  </div>
+                  <div onClick={() => update((s) => ({ ...s, cardioDone: !s.cardioDone }))}
+                    style={{ display: "flex", alignItems: "center", gap: 8, background: st.cardioDone ? "#E7F0EA" : SOFT, borderRadius: 10, padding: "9px 12px", marginBottom: 14, cursor: "pointer", transition: "background .2s" }}>
+                    <div style={{ width: 20, height: 20, flex: "none", borderRadius: 6, border: `2px solid ${st.cardioDone ? A : MUTED}`, background: st.cardioDone ? A : "transparent", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800, boxSizing: "border-box" }}>{st.cardioDone ? "✓" : ""}</div>
+                    <span style={{ fontSize: 12.5, color: SUB, fontWeight: 600 }}>🏃 有氧</span>
+                    <input type="number" inputMode="numeric" value={st.cardioMin}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => update({ cardioMin: e.target.value })}
+                      style={{ width: 34, border: "none", borderBottom: `1.5px solid ${BORDER}`, background: "transparent", fontSize: 12.5, fontWeight: 700, color: INK, textAlign: "center", padding: 0, fontFamily: "inherit" }} />
+                    <span style={{ fontSize: 12.5, color: SUB, fontWeight: 600 }}>分 · 心率 120～130</span>
+                    <span style={{ marginLeft: "auto", fontSize: 12, color: MUTED, fontWeight: 700 }}>第 {planWeek} 週</span>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 11 }}>
+                    <span style={{ fontSize: 14, fontWeight: 800, color: INK }}>{curDay.day}</span>
+                    <span style={{ fontSize: 11, color: "#fff", fontWeight: 700, background: A, padding: "2px 8px", borderRadius: 7 }}>{curDay.focus}</span>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    {curItems.map((ex) => (
+                      <div key={ex.i} style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                        <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, color: INK, lineHeight: 1.35 }}>{ex.n}</span>
+                        <span style={{ fontSize: 12.5, fontWeight: 700, fontFamily: MONO, color: ex.backOff ? ORANGE : A, whiteSpace: "nowrap" }}>{ex.schemeLabel}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ===================== 記餐 ===================== */}
+          {tab === "meal" && (
+            <div style={{ position: "relative" }}>
+              <div style={{ margin: "6px 2px 16px" }}><div style={titleStyle}>記餐</div></div>
+
+              <div style={card}>
+                <div style={secLabel}>餐別</div>
+                <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+                  {["早餐", "午餐", "晚餐", "訓前", "訓後", "加餐"].map((t) => (
+                    <button key={t} onClick={() => update({ mealType: t })} style={chip(st.mealType === t)}>{t}</button>
+                  ))}
+                </div>
+                <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+                  <div style={{ flex: "1 1 140px", minWidth: 0 }}>
+                    <div style={{ ...secLabel, marginBottom: 6 }}>時間</div>
+                    <input type="time" value={st.mealTime} onChange={(e) => update({ mealTime: e.target.value })}
+                      style={{ ...inputBase, width: "100%", boxSizing: "border-box", minWidth: 0, padding: "9px 10px", WebkitAppearance: "none", appearance: "none" }} />
+                  </div>
+                  <div style={{ flex: "1 1 155px", minWidth: 0 }}>
+                    <div style={{ ...secLabel, marginBottom: 6 }}>份量</div>
+                    <div style={{ display: "flex", gap: 6, minWidth: 0 }}>
+                      <input type="number" step="0.5" inputMode="decimal" value={st.foodAmt} onChange={(e) => update({ foodAmt: e.target.value })}
+                        style={{ ...inputBase, flex: 1, minWidth: 0, width: "auto", boxSizing: "border-box", padding: "9px 8px", textAlign: "center" }} />
+                      <div style={{ display: "flex", flex: "none", background: BTN_BG, borderRadius: 10, padding: 2 }}>
+                        <button onClick={() => update({ foodUnit: "份", foodAmt: 1 })} style={unitBtn(st.foodUnit !== "克")}>份</button>
+                        <button onClick={() => update({ foodUnit: "克", foodAmt: 100 })} style={unitBtn(st.foodUnit === "克")}>克</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div style={card}>
+                <div style={{ ...secLabel, marginBottom: 12 }}>常用組合 · 一鍵加入</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {COMBOS.map((cb, ci) => (
+                    <button key={ci} onClick={() => addCombo(cb)}
+                      style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 13px", background: SOFT, border: `1px solid ${CELL_BG}`, borderRadius: 13, cursor: "pointer", textAlign: "left", width: "100%", boxSizing: "border-box" }}>
+                      <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: SUB, fontWeight: 600, lineHeight: 1.4 }}>{cb.label}</span>
+                      <span style={{ flex: "none", width: 26, height: 26, borderRadius: 13, background: A, color: "#fff", fontSize: 16, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}>＋</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div style={card}>
+                <div style={{ ...secLabel, marginBottom: 12 }}>常用食物 · 點擊加入（{st.foodAmt || 0} {st.foodUnit === "克" ? "克" : "份"}）</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8 }}>
+                  {FOODS.map((f) => (
+                    <button key={f.n} onClick={() => addFood(f)}
+                      style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "11px 4px", background: SOFT, border: `1px solid ${CELL_BG}`, borderRadius: 13, cursor: "pointer" }}>
+                      <span style={{ fontSize: 23 }}>{f.e}</span>
+                      <span style={{ fontSize: 11, color: SUB, fontWeight: 600 }}>{f.n}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div style={card}>
+                <div style={{ ...secLabel, marginBottom: 12 }}>自訂食物</div>
+                <input value={st.customName} onChange={(e) => update({ customName: e.target.value })} placeholder="食物名稱"
+                  style={{ ...inputBase, width: "100%", boxSizing: "border-box", borderRadius: 11, padding: "11px 13px", fontWeight: 400, marginBottom: 10 }} />
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <select value={st.customCat} onChange={(e) => update({ customCat: e.target.value })}
+                    style={{ ...inputBase, flex: 1, borderRadius: 11, padding: "11px 12px", fontWeight: 400 }}>
+                    {["carb", "protein", "fat", "veg", "dairy", "fruit"].map((k) => {
+                      const c = CATS.find((x) => x.key === k);
+                      return <option key={k} value={k}>{c.emoji} {c.name}</option>;
+                    })}
+                  </select>
+                  <input type="number" step="0.5" inputMode="decimal" value={st.customServ}
+                    onChange={(e) => update({ customServ: parseFloat(e.target.value) || 0 })}
+                    style={{ ...inputBase, width: 62, borderRadius: 11, padding: "11px 8px", textAlign: "center" }} />
+                  <div style={{ display: "flex", background: BTN_BG, borderRadius: 10, padding: 2 }}>
+                    <button onClick={() => update({ customUnit: "份" })} style={unitBtn(st.customUnit !== "克")}>份</button>
+                    <button onClick={() => update({ customUnit: "克" })} style={unitBtn(st.customUnit === "克")}>克</button>
+                  </div>
+                  <button onClick={addCustom} style={{ width: 40, height: 40, flex: "none", borderRadius: 11, border: "none", background: A, color: "#fff", fontSize: 20, cursor: "pointer" }}>＋</button>
+                </div>
+              </div>
+
+              <div style={{ ...card, margin: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                  <div style={{ fontSize: 15, fontWeight: 600, color: INK }}>今日飲食</div>
+                  <span style={{ fontSize: 13, color: MUTED }}>{st.meals.length} 項</span>
+                </div>
+                {st.meals.length === 0 ? (
+                  <div style={{ textAlign: "center", padding: "24px 0", color: PAGE_BG, fontSize: 14 }}>尚未記錄任何飲食</div>
+                ) : (
+                  st.meals.map((m) => (
+                    <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 11, padding: "11px 0", borderTop: `1px solid ${BTN_BG}` }}>
+                      <span style={{ fontSize: 23 }}>{m.emoji}</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 15, fontWeight: 600, color: INK, overflow: "hidden", textOverflow: "ellipsis" }}>{m.name}</div>
+                        <div style={{ fontSize: 12, color: MUTED }}>{m.type} · {m.time}</div>
+                      </div>
+                      <span style={{ fontSize: 13, color: MUTED, fontWeight: 600, whiteSpace: "nowrap" }}>{m.amount != null ? `${m.amount} ${m.unit}` : "AI"}</span>
+                      <button onClick={() => delMeal(m)} style={{ border: "none", background: "transparent", color: PAGE_BG, fontSize: 16, cursor: "pointer", padding: 4 }}>✕</button>
+                    </div>
+                  ))
+                )}
+              </div>
+              <div style={{ height: 60 }} />
+            </div>
+          )}
+
+          {/* ===================== 計畫 ===================== */}
+          {tab === "plan" && (
+            <div>
+              <div style={{ margin: "6px 2px 16px" }}><div style={titleStyle}>訓練計畫</div></div>
+
+              <div style={{ ...card, display: "flex", alignItems: "center", gap: 12 }}>
+                <div style={{ flex: "none", width: 44, height: 44, borderRadius: 12, background: "#F0EAE0", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>🏃</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: INK }}>有氧訓練</div>
+                  <div style={{ fontSize: 12.5, color: SUB, marginTop: 3 }}>每週 4 次 × 30 分鐘 · 心率 120～130</div>
+                </div>
+              </div>
+
+              <div style={{ ...card, padding: 14 }}>
+                <div style={{ ...secLabel, marginBottom: 8 }}>選擇週期</div>
+                <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+                  {[1, 2, 3].map((w) => <button key={w} onClick={() => update({ planWeek: w })} style={weekBtnStyle(w)}>第 {w} 週</button>)}
+                </div>
+                <div style={{ ...secLabel, marginBottom: 8 }}>選擇訓練日</div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  {PLAN_DAYS.map((d, idx) => <button key={idx} onClick={() => update({ planDay: idx })} style={dayBtnStyle(idx)}>Day {idx + 1}</button>)}
+                </div>
+              </div>
+
+              <div style={card}>
+                <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 15 }}>
+                  <div style={{ fontSize: 19, fontWeight: 800, color: INK, letterSpacing: "-.01em" }}>{curDay.day}</div>
+                  <div style={{ fontSize: 12, color: "#fff", fontWeight: 700, background: A, padding: "3px 9px", borderRadius: 8 }}>{curDay.focus}</div>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 13 }}>
+                  {curItems.map((ex) => (
+                    <div key={ex.i} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                      <div style={{ flex: "none", width: 22, height: 22, borderRadius: 6, background: SOFT, color: A, fontSize: 12, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", marginTop: 1 }}>{ex.i}</div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                          <span style={{ fontSize: 13.5, fontWeight: 600, color: INK, lineHeight: 1.4 }}>{ex.n}</span>
+                          {ex.tags.map((tag, ti) => (
+                            <span key={ti} style={{ fontSize: 10.5, fontWeight: 600, color: "#8A7E6E", background: "#F0EAE0", padding: "2px 7px", borderRadius: 6, whiteSpace: "nowrap" }}>{tag}</span>
+                          ))}
+                        </div>
+                        <div style={{ marginTop: 4 }}>
+                          <span style={{ fontSize: 12.5, fontWeight: 700, fontFamily: MONO, color: ex.backOff ? ORANGE : A }}>{ex.schemeLabel}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div style={{ height: 40 }} />
+            </div>
+          )}
+
+          {/* ===================== 回報 ===================== */}
+          {tab === "report" && (
+            <div>
+              <div style={{ margin: "6px 2px 16px" }}><div style={titleStyle}>回報</div></div>
+
+              <div style={card}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                  <div style={{ fontSize: 15, fontWeight: 600, color: INK }}>📋 每日營養師回報</div>
+                  <button onClick={() => copy(buildReport(), "已複製回報 ✓")}
+                    style={{ padding: "7px 14px", background: A, color: "#fff", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>複製</button>
+                </div>
+                <div style={{ fontSize: 12, color: MUTED, marginBottom: 12 }}>訓練內容自動帶入：今日頁選的 Day 部位＋有氧勾選（例：肩背胸+30有氧）</div>
+                <pre style={{ margin: 0, background: SOFT, borderRadius: 12, padding: 14, fontSize: 12.5, lineHeight: 1.7, color: SUB, whiteSpace: "pre-wrap", fontFamily: MONO, maxHeight: 340, overflowY: "auto" }}>{buildReport()}</pre>
+              </div>
+
+              <div style={card}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+                  <div style={{ fontSize: 15, fontWeight: 600, color: INK }}>📐 週報</div>
+                  <button onClick={() => copy(buildWeekReport(), "已複製週報 ✓")}
+                    style={{ padding: "7px 14px", background: A, color: "#fff", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>複製週報</button>
+                </div>
+                <div style={{ background: SOFT, borderRadius: 12, padding: "10px 14px", marginBottom: 14 }}>
+                  {weekWeights.map((w, i) => (
+                    <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 13, padding: "3px 0" }}>
+                      <span style={{ color: MUTED }}>{w.date}</span>
+                      <span style={{ fontWeight: 700, color: INK, fontVariantNumeric: "tabular-nums" }}>{w.val}</span>
+                    </div>
+                  ))}
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "9px 0 2px", marginTop: 6, borderTop: `1px solid ${BORDER}` }}>
+                    <span style={{ fontSize: 14, color: SUB, fontWeight: 600 }}>七日平均體重</span>
+                    <span style={{ fontSize: 17, fontWeight: 800, color: A, fontVariantNumeric: "tabular-nums" }}>{weekWeights.avg}</span>
+                  </div>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
+                  {measDefs.map(([k, label]) => (
+                    <div key={k}>
+                      <div style={{ fontSize: 12, color: MUTED, marginBottom: 4 }}>{label}</div>
+                      <input type="number" step="0.1" inputMode="decimal" value={st.measure[k] || ""} placeholder="—"
+                        onChange={(e) => update((s) => ({ ...s, measure: { ...s.measure, [k]: e.target.value } }))}
+                        style={{ ...inputBase, width: "100%", boxSizing: "border-box" }} />
+                    </div>
+                  ))}
+                </div>
+                <div style={{ fontSize: 12, color: MUTED, marginBottom: 6 }}>本週計劃執行狀況（睡眠、精神、飲食與訓練）</div>
+                <textarea value={st.weekSummary} onChange={(e) => update({ weekSummary: e.target.value })}
+                  placeholder="總結本週睡眠、精神、飲食與訓練…"
+                  style={{ ...inputBase, width: "100%", minHeight: 82, boxSizing: "border-box", borderRadius: 11, padding: "11px 13px", fontWeight: 400, fontSize: 14, resize: "vertical", lineHeight: 1.5 }} />
+              </div>
+
+              <div style={card}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                  <div style={{ fontSize: 15, fontWeight: 600, color: INK }}>📤 TSV 匯出</div>
+                  <button onClick={() => copy(buildTSV(), "已複製 TSV ✓")}
+                    style={{ padding: "7px 14px", background: BTN_BG, color: A, border: "none", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>複製 TSV</button>
+                </div>
+                <pre style={{ margin: 0, background: SOFT, borderRadius: 12, padding: 12, fontSize: 11, lineHeight: 1.6, color: MUTED, whiteSpace: "pre", overflowX: "auto", fontFamily: MONO }}>{buildTSV()}</pre>
+              </div>
+
+              <div style={{ ...card, margin: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                  <div style={{ fontSize: 15, fontWeight: 600, color: INK }}>☁️ 每週自動上傳</div>
+                  <button onClick={() => doUpload(false)} disabled={uploading}
+                    style={{ padding: "7px 14px", background: uploading ? BTN_BG : A, color: uploading ? MUTED : "#fff", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+                    {uploading ? "上傳中…" : "立即上傳"}
+                  </button>
+                </div>
+                <input value={st.gasUrl} onChange={(e) => update({ gasUrl: e.target.value.trim() })}
+                  placeholder="貼上 Apps Script 網頁應用程式網址"
+                  style={{ ...inputBase, width: "100%", boxSizing: "border-box", fontWeight: 400, fontSize: 13, marginBottom: 10 }} />
+                <div style={{ fontSize: 12, color: MUTED, lineHeight: 1.7 }}>
+                  {st.lastUploadAt ? `上次上傳：${st.lastUploadAt}　已上傳至 ${st.uploadedThrough}` : "尚未上傳過"}
+                  {"　·　待上傳 " + buildPendingDays().length + " 天"}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ===================== 趨勢 ===================== */}
+          {tab === "trend" && (
+            <div>
+              <div style={{ margin: "6px 2px 16px" }}><div style={titleStyle}>趨勢</div></div>
+              <div style={card}>
+                <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 14 }}>
+                  <div style={{ fontSize: 15, fontWeight: 600, color: INK }}>⚖️ 體重 · 14 天</div>
+                  <span style={{ fontSize: 13, color: MUTED }}>{weightLatest}</span>
+                </div>
+                <LineChart series={seriesFor("weight")} unit=" kg" />
+              </div>
+              <div style={card}>
+                <div style={{ fontSize: 15, fontWeight: 600, color: INK, marginBottom: 14 }}>👟 步數 · 目標 {STEP_GOAL.toLocaleString()}</div>
+                <BarChart series={seriesFor("steps")} goal={STEP_GOAL} />
+              </div>
+              <div style={{ ...card, margin: 0 }}>
+                <div style={{ fontSize: 15, fontWeight: 600, color: INK, marginBottom: 14 }}>💧 飲水量 · 14 天</div>
+                <BarChart series={seriesFor("water")} goal={WATER_GOAL} />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* toast */}
+        {toastMsg && (
+          <div style={{ position: "fixed", bottom: 100, left: "50%", transform: "translateX(-50%)", background: "rgba(55,55,55,.96)", color: "#fff", padding: "11px 20px", borderRadius: 22, fontSize: 14, fontWeight: 600, zIndex: 40, animation: "toastIn .25s ease", whiteSpace: "nowrap", boxShadow: "0 8px 24px rgba(0,0,0,.3)" }}>{toastMsg}</div>
+        )}
+
+        {/* tab bar */}
+        <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 430, background: "rgba(250,246,240,.9)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", borderTop: "1px solid rgba(0,0,0,.07)", display: "flex", padding: "8px 0 max(8px, env(safe-area-inset-bottom))", zIndex: 30 }}>
+          {[["today", "🔥", "今日"], ["meal", "🍽️", "記餐"], ["plan", "🏋️", "計畫"], ["report", "📋", "回報"], ["trend", "📈", "趨勢"]].map(([k, e, l]) => (
+            <button key={k} onClick={() => setTab(k)} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3, background: "transparent", border: "none", cursor: "pointer", padding: "4px 0" }}>
+              <span style={{ fontSize: 23, lineHeight: 1, filter: tab === k ? "none" : "grayscale(1) opacity(.55)" }}>{e}</span>
+              <span style={{ fontSize: 10.5, fontWeight: 600, color: tab === k ? A : MUTED }}>{l}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+
+</script>
+</body>
+</html>
