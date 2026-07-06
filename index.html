@@ -237,10 +237,10 @@ function CellRow({ cells }) {
   }
   return <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>{rows}</div>;
 }
-function Cell({ frac = 0, over = false, transparent = false, label = null }) {
+function Cell({ frac = 0, over = false, transparent = false, label = null, onClick = null }) {
   if (transparent) return <div style={{ width: 20, height: 20, flex: "none", borderRadius: 5, background: "transparent" }} />;
   return (
-    <div style={{ width: 20, height: 20, flex: "none", borderRadius: 5, background: over ? OVER_BG : CELL_BG, overflow: label ? "visible" : "hidden", position: "relative" }}>
+    <div onClick={onClick || undefined} style={{ width: 20, height: 20, flex: "none", borderRadius: 5, background: over ? OVER_BG : CELL_BG, overflow: label ? "visible" : "hidden", position: "relative", cursor: onClick ? "pointer" : "default" }}>
       {label && (
         <span style={{ position: "absolute", right: "calc(100% + 6px)", top: "50%", transform: "translateY(-50%)", whiteSpace: "nowrap", fontSize: 13, fontWeight: 600, color: INK, display: "flex", alignItems: "center", gap: 5, pointerEvents: "none" }}>
           <span style={{ fontSize: 15 }}>{label.emoji}</span>{label.name}
@@ -610,11 +610,41 @@ function App() {
   const mCons = consFor(mDate);
   const mIsT = (mDate === st.dayKey ? st.dayType : (((st.history[mDate] || {}).dayType) || "training")) === "training";
   const mTg = mIsT ? TRAIN : REST;
+  /* weekly training progress (Sunday-start week) */
+  const weekCells = (count, target) => {
+    const len = Math.max(target, Math.ceil(count)) || 1;
+    const cells = [];
+    for (let i = 0; i < len; i++) cells.push({ frac: count - i, over: i >= target });
+    return cells;
+  };
+  let wTrain = 0, wCardio = 0;
+  {
+    const ws = new Date(now); ws.setDate(now.getDate() - now.getDay());
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(ws); d.setDate(ws.getDate() + i); const k = keyOf(d);
+      if (k > st.dayKey) break;
+      if (k === st.dayKey) {
+        if (st.dayType === "training") wTrain++;
+        if (st.cardioDone) wCardio++;
+      } else {
+        const h = st.history[k] || {};
+        if (h.dayType === "training") wTrain++;
+        if ((h.cardio || 0) > 0) wCardio++;
+      }
+    }
+  }
 
   /* ---------- water cells ---------- */
   const wTarget = Math.ceil(WATER_GOAL / WATER_CELL);
   const wFilled = Math.floor(st.water / WATER_CELL);
-  const waterCells = []; for (let i = 0; i < wTarget; i++) waterCells.push({ frac: i < wFilled ? 1 : 0, over: false });
+  const waterCells = [];
+  for (let i = 0; i < wTarget; i++) {
+    const L = (i + 1) * WATER_CELL;
+    waterCells.push({
+      frac: i < wFilled ? 1 : 0, over: false,
+      onClick: () => update((s) => { const v = s.water === L ? L - WATER_CELL : L; return { ...s, water: v, history: patchHist(s, { water: v }) }; }),
+    });
+  }
 
   /* ---------- plan derived ---------- */
   const planWeek = st.planWeek || 1;
@@ -746,22 +776,35 @@ function App() {
                 </div>
               </div>
 
-              {/* water */}
-              <div style={{ ...card, borderRadius: 20, position: "relative" }}>
-                <div style={{ display: "flex", alignItems: "flex-start", gap: 8, margin: "0 0 14px" }}>
-                  <div style={{ width: 72, flex: "none" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14, fontWeight: 600, color: INK, whiteSpace: "nowrap" }}><span style={{ fontSize: 16 }}>💧</span>飲水</div>
-                    <div style={{ fontSize: 11, color: MUTED, fontWeight: 700, marginTop: 4, fontVariantNumeric: "tabular-nums" }}>{st.water}ml</div>
+                            {/* water */}
+              <div style={{ ...card, borderRadius: 20, padding: "16px 8px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{ width: 80, flex: "none", boxSizing: "border-box", paddingLeft: 8, display: "flex", alignItems: "center", gap: 4, fontSize: 12, fontWeight: 700, color: INK, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
+                    <span style={{ fontSize: 16 }}>💧</span>{st.water}ml
                   </div>
-                  <div style={{ flex: 1, paddingTop: 1 }}><CellRow cells={waterCells} /></div>
+                  <div style={{ flex: "none" }}><CellRow cells={waterCells} /></div>
                 </div>
-                <div style={{ display: "flex", gap: 8 }}>
-                  {[250, 500, 1000].map((a) => (
-                    <button key={a} onClick={() => update((s) => { const v = s.water + a; return { ...s, water: v, history: patchHist(s, { water: v }) }; })}
-                      style={{ flex: 1, padding: "11px 0", background: BTN_BG, border: "none", borderRadius: 12, fontSize: 14, fontWeight: 700, color: A, cursor: "pointer" }}>+{a}</button>
-                  ))}
-                  <button onClick={() => update((s) => ({ ...s, water: 0, history: patchHist(s, { water: 0 }) }))}
-                    style={{ width: 44, flex: "none", padding: "11px 0", background: BTN_BG, border: "none", borderRadius: 12, fontSize: 15, cursor: "pointer" }}>↺</button>
+              </div>
+
+              <div style={{ ...card, borderRadius: 20 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "0 0 14px" }}>
+                  <div style={{ fontSize: 15, fontWeight: 600, color: INK }}>💪 本週訓練</div>
+                  <span style={{ fontSize: 12, color: MUTED, fontWeight: 700 }}>週目標 4＋4</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "nowrap" }}>
+                  <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, fontSize: 13.5, fontWeight: 600, color: INK, whiteSpace: "nowrap" }}>
+                    <span style={{ fontSize: 15 }}>🏋️</span>訓練
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 4, flex: "none" }}>
+                    {weekCells(wTrain, 4).map((cell, i) => <Cell key={"t" + i} {...cell} />)}
+                  </div>
+                  <div style={{ width: 0, height: 20, flex: "none", borderLeft: `1px dashed ${MUTED}`, margin: "0 3px" }} />
+                  <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, fontSize: 13.5, fontWeight: 600, color: INK, whiteSpace: "nowrap" }}>
+                    <span style={{ fontSize: 15 }}>🏃</span>有氧
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 4, flex: "none" }}>
+                    {weekCells(wCardio, 4).map((cell, i) => <Cell key={"c" + i} {...cell} />)}
+                  </div>
                 </div>
               </div>
 
@@ -778,15 +821,16 @@ function App() {
                     ))}
                   </div>
                   <div onClick={() => update((s) => ({ ...s, cardioDone: !s.cardioDone }))}
-                    style={{ display: "flex", alignItems: "center", gap: 8, background: st.cardioDone ? "#E7F0EA" : SOFT, borderRadius: 10, padding: "9px 12px", marginBottom: 14, cursor: "pointer", transition: "background .2s" }}>
+                    style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "nowrap", background: st.cardioDone ? "#E7F0EA" : SOFT, borderRadius: 10, padding: "9px 10px", marginBottom: 14, cursor: "pointer", transition: "background .2s" }}>
                     <div style={{ width: 20, height: 20, flex: "none", borderRadius: 6, border: `2px solid ${st.cardioDone ? A : MUTED}`, background: st.cardioDone ? A : "transparent", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800, boxSizing: "border-box" }}>{st.cardioDone ? "✓" : ""}</div>
-                    <span style={{ fontSize: 12.5, color: SUB, fontWeight: 600 }}>🏃 有氧</span>
+                    <span style={{ fontSize: 12, color: SUB, fontWeight: 600, whiteSpace: "nowrap", flex: "none" }}>🏃 有氧</span>
                     <input type="number" inputMode="numeric" value={st.cardioMin}
                       onClick={(e) => e.stopPropagation()}
                       onChange={(e) => update({ cardioMin: e.target.value })}
-                      style={{ width: 34, border: "none", borderBottom: `1.5px solid ${BORDER}`, background: "transparent", fontSize: 12.5, fontWeight: 700, color: INK, textAlign: "center", padding: 0, fontFamily: "inherit" }} />
-                    <span style={{ fontSize: 12.5, color: SUB, fontWeight: 600 }}>分 · 心率 120～130</span>
-                    <span style={{ marginLeft: "auto", fontSize: 12, color: MUTED, fontWeight: 700 }}>第 {planWeek} 週</span>
+                      style={{ width: 28, flex: "none", border: "none", borderBottom: `1.5px solid ${BORDER}`, background: "transparent", fontSize: 12, fontWeight: 700, color: INK, textAlign: "center", padding: 0, fontFamily: "inherit" }} />
+                    <span style={{ fontSize: 11.5, color: SUB, fontWeight: 600, whiteSpace: "nowrap", flex: "none" }}>分 · 心率120-130</span>
+                    <button onClick={(e) => { e.stopPropagation(); update({ planWeek: (planWeek % 3) + 1 }); }}
+                      style={{ marginLeft: "auto", flex: "none", padding: "3px 8px", border: "none", borderRadius: 8, background: planWeek === 3 ? "#F6E4DA" : BTN_BG, color: planWeek === 3 ? ORANGE : SUB, fontSize: 11.5, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>第 {planWeek} 週 ›</button>
                   </div>
                   <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 11 }}>
                     <span style={{ fontSize: 14, fontWeight: 800, color: INK }}>{curDay.day}</span>
@@ -936,10 +980,10 @@ function App() {
                   <button onClick={applySort} title="重新排序"
                     style={{ width: 32, height: 32, flex: "none", border: "none", borderRadius: 9, background: BTN_BG, color: SUB, fontSize: 16, cursor: "pointer", lineHeight: 1 }}>↻</button>
                 </div>
-                <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 4, marginBottom: 6 }}>
-                  {["全部", "早餐", "午餐", "晚餐", "訓前", "訓後", "加餐"].map((t) => (
+                <div style={{ display: "flex", gap: 5, paddingBottom: 4, marginBottom: 6 }}>
+                  {[["全部", "全部"], ["早", "早餐"], ["午", "午餐"], ["晚", "晚餐"], ["訓前", "訓前"], ["訓後", "訓後"], ["加餐", "加餐"]].map(([lb, t]) => (
                     <button key={t} onClick={() => setMealFilter(t)}
-                      style={{ flex: "none", padding: "6px 12px", borderRadius: 16, fontSize: 12, fontWeight: 700, border: "none", cursor: "pointer", background: mealFilter === t ? A : BTN_BG, color: mealFilter === t ? "#fff" : SUB }}>{t}</button>
+                      style={{ flex: 1, minWidth: 0, padding: "6px 0", borderRadius: 16, fontSize: 12, fontWeight: 700, border: "none", cursor: "pointer", whiteSpace: "nowrap", background: mealFilter === t ? A : BTN_BG, color: mealFilter === t ? "#fff" : SUB }}>{lb}</button>
                   ))}
                 </div>
                 {(() => {
@@ -1115,9 +1159,8 @@ function App() {
                 <input value={st.gasUrl} onChange={(e) => update({ gasUrl: e.target.value.trim() })}
                   placeholder="貼上 Apps Script 網頁應用程式網址"
                   style={{ ...inputBase, width: "100%", boxSizing: "border-box", fontWeight: 400, fontSize: 13, marginBottom: 10 }} />
-                <div style={{ fontSize: 12, color: MUTED, lineHeight: 1.7 }}>
-                  {st.lastUploadAt ? `上次上傳：${st.lastUploadAt}　已上傳至 ${st.uploadedThrough}` : "尚未上傳過"}
-                  {"　·　待上傳 " + buildPendingDays().length + " 天"}
+                <div style={{ fontSize: 11.5, color: MUTED, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {(st.lastUploadAt ? `上次 ${st.lastUploadAt} · 已傳至 ${Number(st.uploadedThrough.slice(5, 7))}/${Number(st.uploadedThrough.slice(8, 10))}` : "尚未上傳過") + " · 待傳 " + buildPendingDays().length + " 天"}
                 </div>
               </div>
             </div>
