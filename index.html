@@ -73,6 +73,10 @@ const FOODS = [
   { e: "🥤", n: "乳清", c: "whey", g2s: 30 },
 ];
 
+/* slider steps */
+const SERV_STEPS = [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4];
+const GRAM_STEPS = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 200, 300, 400];
+
 /* one-tap meal combos (serv pre-computed from exchange table) */
 const COMBOS = [
   { emojis: ["🍚", "🥚", "🫘", "🥜"], label: "米糊40＋蛋1＋豆漿200＋花生醬20", items: [
@@ -135,6 +139,21 @@ const keyOf = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getD
 const todayKey = () => keyOf(new Date());
 const nowTime = () => { const d = new Date(); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
 const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
+const TYPE_ORDER = { 早餐: 0, 午餐: 1, 晚餐: 2, 訓前: 3, 訓後: 4, 加餐: 5 };
+const CAT_ORDER = { carb: 0, protein: 1, fat: 2, veg: 3, dairy: 4, fruit: 5, whey: 6 };
+const TYPE_STYLE = {
+  早餐: { bg: "#F6EAD8", fg: "#B0763F" },
+  午餐: { bg: "#E7F0EA", fg: "#5A9B7C" },
+  晚餐: { bg: "#EAE6F2", fg: "#7A6FA0" },
+  訓前: { bg: "#E2EDF5", fg: "#4A7FA5" },
+  訓後: { bg: "#E2EDF5", fg: "#4A7FA5" },
+  加餐: { bg: "#F6E4DA", fg: "#D2795A" },
+};
+const domCat = (m) => { let best = "whey", bv = -1; CATS.forEach((c) => { const v = (m.portions && m.portions[c.key]) || 0; if (v > bv) { bv = v; best = c.key; } }); return best; };
+const sortMeals = (list) => list.slice().sort((a, b) =>
+  (a.time || "").localeCompare(b.time || "") ||
+  ((TYPE_ORDER[a.type] ?? 9) - (TYPE_ORDER[b.type] ?? 9)) ||
+  ((CAT_ORDER[domCat(a)] ?? 9) - (CAT_ORDER[domCat(b)] ?? 9)));
 
 const parseScheme = (str) => {
   const parts = String(str).split("*");
@@ -153,6 +172,7 @@ const DEFAULT_STATE = {
   dayKey: todayKey(), dayType: "training",
   ...emptyDaily(),
   mealType: "早餐", mealTime: "", foodUnit: "份", foodAmt: 1,
+  mealDate: "",
   customName: "", customServ: 1, customCat: "protein", customUnit: "份",
   planWeek: 1, planDay: 0,
   measure: { hip: "", navelMid: "", navelUp: "", navelDown: "", gripR: "", gripL: "" },
@@ -307,6 +327,10 @@ function App() {
   const [tab, setTab] = useState("today");
   const [toastMsg, setToastMsg] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [editId, setEditId] = useState(null);
+  const [editVal, setEditVal] = useState("");
+  const [mealFilter, setMealFilter] = useState("全部");
+  const [editTime, setEditTime] = useState("");
   const autoUpRef = useRef(false);
   const doUploadRef = useRef(null);
   const saveTimer = useRef(null);
@@ -315,6 +339,7 @@ function App() {
   useEffect(() => {
     loadState().then((s) => {
       if (!s.mealTime) s.mealTime = nowTime();
+      s.mealDate = todayKey();
       setSt(s);
       saveState(s);
     });
@@ -364,7 +389,16 @@ function App() {
   const tg = isT ? TRAIN : REST;
   const now = new Date();
 
-  /* ---------- meal ops ---------- */
+  /* ---------- meal ops (date-aware) ---------- */
+  const mDate = st.mealDate || st.dayKey;
+  const mealsFor = (dk) => (dk === st.dayKey ? st.meals : (((st.history[dk] || {}).meals) || []));
+  const setMealsFor = (dk, meals) => update((s) => {
+    if (dk === s.dayKey) return { ...s, meals };
+    const h = { ...s.history };
+    h[dk] = { ...(h[dk] || {}), meals };
+    return { ...s, history: h };
+  });
+  const newId = () => Date.now() + Math.random().toString(36).slice(2, 5);
   const addFood = (f) => {
     const val = parseFloat(st.foodAmt) || 0;
     if (val <= 0) return;
@@ -372,8 +406,8 @@ function App() {
     const serv = unit === "克" ? Math.round((val / f.g2s) * 2) / 2 : val;
     const portions = Object.fromEntries(CATS.map((c) => [c.key, 0]));
     portions[f.c] = serv;
-    const entry = { id: Date.now() + Math.random().toString(36).slice(2, 5), type: st.mealType, time: st.mealTime || nowTime(), name: f.n, emoji: f.e, portions, amount: val, unit };
-    update((s) => ({ ...s, meals: [entry, ...s.meals] }));
+    const entry = { id: newId(), type: st.mealType, time: st.mealTime || nowTime(), name: f.n, emoji: f.e, portions, amount: val, unit };
+    setMealsFor(mDate, [entry, ...mealsFor(mDate)]);
     toast(`已加入 ${f.e} ${f.n}　${val} ${unit}`);
   };
   const addCustom = () => {
@@ -383,20 +417,52 @@ function App() {
     const serv = unit === "克" ? Math.round((st.customServ / 100) * 2) / 2 : st.customServ;
     const portions = Object.fromEntries(CATS.map((c) => [c.key, 0]));
     portions[st.customCat] = serv;
-    const entry = { id: Date.now() + Math.random().toString(36).slice(2, 5), type: st.mealType, time: st.mealTime || nowTime(), name: st.customName.trim(), emoji: cat.emoji, portions, amount: st.customServ, unit };
-    update((s) => ({ ...s, meals: [entry, ...s.meals], customName: "" }));
-    toast(`已加入 ${st.customName.trim()}`);
+    const entry = { id: newId(), type: st.mealType, time: st.mealTime || nowTime(), name: st.customName.trim(), emoji: cat.emoji, portions, amount: st.customServ, unit };
+    update((s) => ({ ...s, customName: "" }));
+    setMealsFor(mDate, [entry, ...mealsFor(mDate)]);
+    toast(`已加入 ${entry.name}`);
   };
-  const delMeal = (m) => update((s) => ({ ...s, meals: s.meals.filter((x) => x.id !== m.id) }));
+  const delMeal = (m) => setMealsFor(mDate, mealsFor(mDate).filter((x) => x.id !== m.id));
   const addCombo = (combo) => {
     const time = st.mealTime || nowTime();
     const entries = combo.items.map((it) => {
       const portions = Object.fromEntries(CATS.map((c) => [c.key, 0]));
       portions[it.c] = it.serv;
-      return { id: Date.now() + Math.random().toString(36).slice(2, 6), type: st.mealType, time, name: it.n, emoji: it.e, portions, amount: it.amount, unit: it.unit };
+      return { id: newId(), type: st.mealType, time, name: it.n, emoji: it.e, portions, amount: it.amount, unit: it.unit };
     });
-    update((s) => ({ ...s, meals: [...entries.reverse(), ...s.meals] }));
+    setMealsFor(mDate, [...entries.reverse(), ...mealsFor(mDate)]);
     toast(`已加入組合（${combo.items.length} 項）`);
+  };
+  const startEdit = (m) => { setEditId(m.id); setEditVal(m.amount != null ? String(m.amount) : ""); setEditTime(m.time || ""); };
+  const commitEdit = (m) => {
+    const v = parseFloat(editVal);
+    const t = editTime || m.time;
+    setEditId(null);
+    const changedAmt = (v > 0) && (m.amount > 0) && v !== m.amount;
+    const changedTime = t !== m.time;
+    if (!changedAmt && !changedTime) return;
+    let amount = m.amount, portions = m.portions;
+    if (changedAmt) {
+      const factor = v / m.amount;
+      amount = v;
+      portions = {};
+      CATS.forEach((c) => { portions[c.key] = Math.round(((m.portions[c.key] || 0) * factor) * 100) / 100; });
+    }
+    setMealsFor(mDate, mealsFor(mDate).map((x) => (x.id === m.id ? { ...x, amount, portions, time: t } : x)));
+    toast(`已更新 ${m.name}`);
+  };
+  const copyLunchToDinner = () => {
+    const list = mealsFor(mDate);
+    const lunch = list.filter((x) => x.type === "午餐");
+    if (!lunch.length) { toast("這天還沒有午餐紀錄"); return; }
+    const dinnerTime = "17:00";
+    const copies = lunch.map((x) => ({ ...x, id: newId(), type: "晚餐", time: dinnerTime, portions: { ...x.portions } }));
+    setMealsFor(mDate, [...copies, ...list]);
+    toast(`晚餐＝午餐　已複製 ${lunch.length} 項`);
+  };
+  const applySort = () => {
+    setMealsFor(mDate, sortMeals(mealsFor(mDate)));
+    toast("已重新排序");
   };
 
   /* ---------- weekly cloud upload (Google Apps Script) ---------- */
@@ -413,10 +479,10 @@ function App() {
       const h = st.history[k] || {};
       const d = new Date(k + "T00:00:00");
       const groups = {}, order = [];
-      (h.meals || []).slice().reverse().forEach((m) => {
+      sortMeals(h.meals || []).forEach((m) => {
         const gk = m.time + "|" + m.type;
         if (!groups[gk]) { groups[gk] = { time: m.time, type: m.type, items: [], p: Object.fromEntries(CATS.map((c) => [c.key, 0])) }; order.push(gk); }
-        groups[gk].items.push(m.amount != null ? m.name + fmt(m.amount) + (m.unit === "克" ? "" : "份") : m.name);
+        groups[gk].items.push(m.amount != null ? m.name + fmt(m.amount) + (m.unit || "") : m.name);
         CATS.forEach((c) => { groups[gk].p[c.key] += m.portions[c.key] || 0; });
       });
       order.sort((a, b) => (groups[a].time || "").localeCompare(groups[b].time || ""));
@@ -461,10 +527,10 @@ function App() {
     L.push(`排便：${st.bowel}次`);
     const abbr = { 早餐: "早", 午餐: "午", 晚餐: "晚", 加餐: "加餐", 訓前: "訓前", 訓後: "訓後" };
     const groups = {}, order = [];
-    st.meals.slice().reverse().forEach((m) => {
+    sortMeals(st.meals).forEach((m) => {
       const k = m.time + "|" + m.type;
       if (!groups[k]) { groups[k] = { time: m.time, type: m.type, items: [] }; order.push(k); }
-      groups[k].items.push(m.amount != null ? m.name + fmt(m.amount) + (m.unit === "克" ? "" : m.unit === "份" ? "份" : m.unit) : m.name);
+      groups[k].items.push(m.amount != null ? m.name + fmt(m.amount) + (m.unit || "") : m.name);
     });
     order.sort((a, b) => (groups[a].time || "").localeCompare(groups[b].time || ""));
     order.forEach((k) => { const g = groups[k]; L.push(`${g.time} ${abbr[g.type] || g.type}：${g.items.join("、")}`); });
@@ -521,19 +587,29 @@ function App() {
   };
 
   /* ---------- nutrition grid data ---------- */
-  const buildCatCells = (key) => {
-    const cur = consumed[key] || 0; const t = tg[key];
+  const buildCatCells = (key, cons = consumed, targets = tg) => {
+    const cur = cons[key] || 0; const t = targets[key];
     const len = Math.max(t, Math.ceil(cur)) || 1;
     const cells = [];
     for (let i = 0; i < len; i++) cells.push({ frac: cur - i, over: i >= t });
     return cells;
   };
-  const mk = (key, withLabel) => {
+  const mk = (key, withLabel, cons = consumed, targets = tg) => {
     const c = CATS.find((x) => x.key === key);
-    const cur = consumed[key] || 0; const t = tg[key];
+    const cur = cons[key] || 0; const t = targets[key];
     return { frac: Math.min(1, cur), over: cur > t, label: withLabel ? { emoji: c.emoji, name: c.name } : null };
   };
-  const secRow = [mk("dairy", false), { transparent: true }, { transparent: true }, { transparent: true }, mk("fruit", true), { gap: true }, { transparent: true }, { transparent: true }, { transparent: true }, mk("whey", true)];
+  const secRowFor = (cons, targets) => [mk("dairy", false, cons, targets), { transparent: true }, { transparent: true }, { transparent: true }, mk("fruit", true, cons, targets), { gap: true }, { transparent: true }, { transparent: true }, { transparent: true }, mk("whey", true, cons, targets)];
+  const secRow = secRowFor(consumed, tg);
+  /* meal-page date-aware consumption */
+  const consFor = (dk) => {
+    const n = Object.fromEntries(CATS.map((c) => [c.key, 0]));
+    mealsFor(dk).forEach((m) => CATS.forEach((c) => { n[c.key] += (m.portions && m.portions[c.key]) || 0; }));
+    return n;
+  };
+  const mCons = consFor(mDate);
+  const mIsT = (mDate === st.dayKey ? st.dayType : (((st.history[mDate] || {}).dayType) || "training")) === "training";
+  const mTg = mIsT ? TRAIN : REST;
 
   /* ---------- water cells ---------- */
   const wTarget = Math.ceil(WATER_GOAL / WATER_CELL);
@@ -586,6 +662,9 @@ function App() {
         input:focus,select:focus,textarea:focus{outline:none}
         ::-webkit-scrollbar{width:0;height:0}
         input::-webkit-outer-spin-button,input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+        input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:6px;border-radius:3px;background:#EAE3D8;outline:none;padding:0;margin:10px 0 2px}
+        input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:26px;height:26px;border-radius:13px;background:#5A9B7C;border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.25);cursor:pointer}
+        input[type=range]::-moz-range-thumb{width:20px;height:20px;border-radius:10px;background:#5A9B7C;border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.25);cursor:pointer}
         @keyframes toastIn{from{opacity:0;transform:translate(-50%,12px)}to{opacity:1;transform:translate(-50%,0)}}
       `}</style>
       <div style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: APP_BG, position: "relative" }}>
@@ -731,6 +810,34 @@ function App() {
             <div style={{ position: "relative" }}>
               <div style={{ margin: "6px 2px 16px" }}><div style={titleStyle}>記餐</div></div>
 
+              <div style={{ ...card, borderRadius: 20, padding: 14 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "0 0 12px" }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: INK }}>🍱 營養份數</div>
+                  <span style={{ fontSize: 12, color: MUTED, fontWeight: 700 }}>{mDate === st.dayKey ? "" : `${Number(mDate.slice(5, 7))}/${Number(mDate.slice(8, 10))} · `}{mIsT ? "訓練日" : "休息日"}目標</span>
+                </div>
+                {["carb", "protein", "fat", "veg"].map((key) => {
+                  const c = CATS.find((x) => x.key === key);
+                  return (
+                    <div key={key} style={{ display: "flex", alignItems: "flex-start", gap: 8, margin: "0 0 10px" }}>
+                      <div style={{ width: 72, flex: "none", display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 600, color: INK, paddingTop: 1, whiteSpace: "nowrap" }}>
+                        <span style={{ fontSize: 15 }}>{c.emoji}</span>{c.name}
+                      </div>
+                      <div style={{ flex: 1 }}><CellRow cells={buildCatCells(key, mCons, mTg)} /></div>
+                    </div>
+                  );
+                })}
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10 }}>
+                  <div style={{ width: 72, flex: "none", display: "flex", alignItems: "center", gap: 5, fontSize: 13, fontWeight: 600, color: INK, whiteSpace: "nowrap" }}>
+                    <span style={{ fontSize: 15 }}>🥛</span>乳製品
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    {secRowFor(mCons, mTg).map((cell, i) => cell.gap
+                      ? <div key={i} style={{ width: 0, height: 20, flex: "none", borderLeft: "1px solid transparent", margin: "0 2px" }} />
+                      : <Cell key={i} {...cell} />)}
+                  </div>
+                </div>
+              </div>
+
               <div style={card}>
                 <div style={secLabel}>餐別</div>
                 <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
@@ -739,20 +846,34 @@ function App() {
                   ))}
                 </div>
                 <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
-                  <div style={{ flex: "1 1 140px", minWidth: 0 }}>
+                  <div style={{ flex: "1 1 130px", minWidth: 0 }}>
+                    <div style={{ ...secLabel, marginBottom: 6 }}>日期</div>
+                    <input type="date" value={mDate} onChange={(e) => update({ mealDate: e.target.value || todayKey() })}
+                      style={{ ...inputBase, width: "100%", boxSizing: "border-box", minWidth: 0, padding: "9px 10px", WebkitAppearance: "none", appearance: "none", color: mDate === st.dayKey ? INK : "#B0763F" }} />
+                  </div>
+                  <div style={{ flex: "1 1 130px", minWidth: 0 }}>
                     <div style={{ ...secLabel, marginBottom: 6 }}>時間</div>
                     <input type="time" value={st.mealTime} onChange={(e) => update({ mealTime: e.target.value })}
                       style={{ ...inputBase, width: "100%", boxSizing: "border-box", minWidth: 0, padding: "9px 10px", WebkitAppearance: "none", appearance: "none" }} />
                   </div>
-                  <div style={{ flex: "1 1 155px", minWidth: 0 }}>
-                    <div style={{ ...secLabel, marginBottom: 6 }}>份量</div>
-                    <div style={{ display: "flex", gap: 6, minWidth: 0 }}>
-                      <input type="number" step="0.5" inputMode="decimal" value={st.foodAmt} onChange={(e) => update({ foodAmt: e.target.value })}
-                        style={{ ...inputBase, flex: 1, minWidth: 0, width: "auto", boxSizing: "border-box", padding: "9px 8px", textAlign: "center" }} />
-                      <div style={{ display: "flex", flex: "none", background: BTN_BG, borderRadius: 10, padding: 2 }}>
-                        <button onClick={() => update({ foodUnit: "份", foodAmt: 1 })} style={unitBtn(st.foodUnit !== "克")}>份</button>
-                        <button onClick={() => update({ foodUnit: "克", foodAmt: 100 })} style={unitBtn(st.foodUnit === "克")}>克</button>
+                  <div style={{ flex: "1 1 100%", minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 2 }}>
+                      <div style={{ ...secLabel, marginBottom: 0 }}>份量</div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <span style={{ fontSize: 17, fontWeight: 800, color: A, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{st.foodAmt} {st.foodUnit}</span>
+                        <div style={{ display: "flex", background: BTN_BG, borderRadius: 10, padding: 2 }}>
+                          <button onClick={() => update({ foodUnit: "份", foodAmt: 1 })} style={unitBtn(st.foodUnit !== "克")}>份</button>
+                          <button onClick={() => update({ foodUnit: "克", foodAmt: 100 })} style={unitBtn(st.foodUnit === "克")}>克</button>
+                        </div>
                       </div>
+                    </div>
+                    <input type="range" min={0} step={1}
+                      max={(st.foodUnit === "克" ? GRAM_STEPS : SERV_STEPS).length - 1}
+                      value={Math.max(0, (st.foodUnit === "克" ? GRAM_STEPS : SERV_STEPS).indexOf(parseFloat(st.foodAmt)))}
+                      onChange={(e) => update({ foodAmt: (st.foodUnit === "克" ? GRAM_STEPS : SERV_STEPS)[Number(e.target.value)] })} />
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, color: MUTED, marginTop: 2 }}>
+                      <span>{st.foodUnit === "克" ? "10克" : "0.5份"}</span>
+                      <span>{st.foodUnit === "克" ? "400克" : "4份"}</span>
                     </div>
                   </div>
                 </div>
@@ -808,25 +929,67 @@ function App() {
               </div>
 
               <div style={{ ...card, margin: 0 }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-                  <div style={{ fontSize: 15, fontWeight: 600, color: INK }}>今日飲食</div>
-                  <span style={{ fontSize: 13, color: MUTED }}>{st.meals.length} 項</span>
+                <div style={{ display: "flex", alignItems: "center", marginBottom: 10, gap: 8 }}>
+                  <div style={{ fontSize: 15, fontWeight: 600, color: INK, whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>{mDate === st.dayKey ? "今日飲食" : `${Number(mDate.slice(5, 7))}/${Number(mDate.slice(8, 10))} 飲食`}</div>
+                  <button onClick={copyLunchToDinner}
+                    style={{ padding: "7px 11px", background: BTN_BG, border: "none", borderRadius: 9, fontSize: 12, fontWeight: 700, color: A, cursor: "pointer", whiteSpace: "nowrap", flex: "none" }}>晚餐＝午餐</button>
+                  <button onClick={applySort} title="重新排序"
+                    style={{ width: 32, height: 32, flex: "none", border: "none", borderRadius: 9, background: BTN_BG, color: SUB, fontSize: 16, cursor: "pointer", lineHeight: 1 }}>↻</button>
                 </div>
-                {st.meals.length === 0 ? (
-                  <div style={{ textAlign: "center", padding: "24px 0", color: PAGE_BG, fontSize: 14 }}>尚未記錄任何飲食</div>
-                ) : (
-                  st.meals.map((m) => (
-                    <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 11, padding: "11px 0", borderTop: `1px solid ${BTN_BG}` }}>
-                      <span style={{ fontSize: 23 }}>{m.emoji}</span>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 15, fontWeight: 600, color: INK, overflow: "hidden", textOverflow: "ellipsis" }}>{m.name}</div>
-                        <div style={{ fontSize: 12, color: MUTED }}>{m.type} · {m.time}</div>
-                      </div>
-                      <span style={{ fontSize: 13, color: MUTED, fontWeight: 600, whiteSpace: "nowrap" }}>{m.amount != null ? `${m.amount} ${m.unit}` : "AI"}</span>
-                      <button onClick={() => delMeal(m)} style={{ border: "none", background: "transparent", color: PAGE_BG, fontSize: 16, cursor: "pointer", padding: 4 }}>✕</button>
-                    </div>
-                  ))
-                )}
+                <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 4, marginBottom: 6 }}>
+                  {["全部", "早餐", "午餐", "晚餐", "訓前", "訓後", "加餐"].map((t) => (
+                    <button key={t} onClick={() => setMealFilter(t)}
+                      style={{ flex: "none", padding: "6px 12px", borderRadius: 16, fontSize: 12, fontWeight: 700, border: "none", cursor: "pointer", background: mealFilter === t ? A : BTN_BG, color: mealFilter === t ? "#fff" : SUB }}>{t}</button>
+                  ))}
+                </div>
+                {(() => {
+                  const list = mealsFor(mDate).filter((m) => mealFilter === "全部" || m.type === mealFilter);
+                  if (!list.length) return <div style={{ textAlign: "center", padding: "24px 0", color: PAGE_BG, fontSize: 14 }}>尚未記錄任何飲食</div>;
+                  let prevType = null;
+                  return list.map((m) => {
+                    const showHeader = m.type !== prevType;
+                    prevType = m.type;
+                    const ts = TYPE_STYLE[m.type] || { bg: BTN_BG, fg: SUB };
+                    return (
+                      <React.Fragment key={m.id}>
+                        {showHeader && (
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 0 4px" }}>
+                            <span style={{ fontSize: 11.5, fontWeight: 800, color: ts.fg, background: ts.bg, padding: "3px 10px", borderRadius: 8 }}>{m.type}</span>
+                            <div style={{ flex: 1, borderTop: `1px solid ${BORDER}` }} />
+                          </div>
+                        )}
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderTop: showHeader ? "none" : `1px solid ${BTN_BG}` }}>
+                          <span style={{ fontSize: 23 }}>{m.emoji}</span>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 15, fontWeight: 600, color: INK, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</div>
+                            <div style={{ fontSize: 12, color: MUTED }}>{m.time}</div>
+                          </div>
+                          {editId === m.id ? (
+                            <span style={{ display: "flex", alignItems: "center", gap: 4, flex: "none" }}>
+                              <input type="time" value={editTime}
+                                onChange={(e) => setEditTime(e.target.value)}
+                                style={{ ...inputBase, padding: "6px 4px", fontSize: 13, boxSizing: "border-box", WebkitAppearance: "none", appearance: "none" }} />
+                              {m.amount != null && (
+                                <input type="number" step="0.5" inputMode="decimal" autoFocus value={editVal}
+                                  onChange={(e) => setEditVal(e.target.value)}
+                                  onKeyDown={(e) => { if (e.key === "Enter") commitEdit(m); }}
+                                  style={{ ...inputBase, width: 48, padding: "6px 4px", textAlign: "center", fontSize: 14, boxSizing: "border-box" }} />
+                              )}
+                              <button onClick={() => commitEdit(m)}
+                                style={{ width: 30, height: 30, flex: "none", border: "none", borderRadius: 8, background: A, color: "#fff", fontSize: 15, cursor: "pointer" }}>✓</button>
+                            </span>
+                          ) : (
+                            <button onClick={() => startEdit(m)}
+                              style={{ border: "none", background: SOFT, borderRadius: 8, padding: "6px 9px", fontSize: 13, color: SUB, fontWeight: 700, whiteSpace: "nowrap", cursor: "pointer", flex: "none" }}>
+                              {m.amount != null ? `${m.amount} ${m.unit}` : "—"} ✎
+                            </button>
+                          )}
+                          <button onClick={() => delMeal(m)} style={{ border: "none", background: "transparent", color: PAGE_BG, fontSize: 16, cursor: "pointer", padding: 4, flex: "none" }}>✕</button>
+                        </div>
+                      </React.Fragment>
+                    );
+                  });
+                })()}
               </div>
               <div style={{ height: 60 }} />
             </div>
@@ -895,7 +1058,6 @@ function App() {
                   <button onClick={() => copy(buildReport(), "已複製回報 ✓")}
                     style={{ padding: "7px 14px", background: A, color: "#fff", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>複製</button>
                 </div>
-                <div style={{ fontSize: 12, color: MUTED, marginBottom: 12 }}>訓練內容自動帶入：今日頁選的 Day 部位＋有氧勾選（例：肩背胸+30有氧）</div>
                 <pre style={{ margin: 0, background: SOFT, borderRadius: 12, padding: 14, fontSize: 12.5, lineHeight: 1.7, color: SUB, whiteSpace: "pre-wrap", fontFamily: MONO, maxHeight: 340, overflowY: "auto" }}>{buildReport()}</pre>
               </div>
 
@@ -1004,7 +1166,6 @@ function App() {
 }
 
 
-  
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);
 
 </script>
