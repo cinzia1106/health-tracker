@@ -58,10 +58,11 @@ const TRAIN = { carb: 8, protein: 9, dairy: 1, fruit: 1, veg: 4, whey: 1, fat: 6
 const REST = { carb: 5, protein: 10, dairy: 1, fruit: 1, veg: 4, whey: 1, fat: 5 };
 
 /* g2s = grams per 1 serving (from nutritionist exchange table) */
+// g2s = 幾克 = 1 份（依營養師份量替換表；碳水1份=15g醣、蛋白質1份=7g蛋白）
 const FOODS = [
   { e: "🍚", n: "米糊", c: "carb", g2s: 20 },
   { e: "🍠", n: "地瓜", c: "carb", g2s: 55 },
-  { e: "🍙", n: "飯糰", c: "carb", g2s: 62 },
+  { e: "🍙", n: "飯糰", c: "carb", g2s: 31 },
   { e: "🍗", n: "雞胸肉", c: "protein", g2s: 30 },
   { e: "🥚", n: "蛋", c: "protein", g2s: 55 },
   { e: "🫘", n: "豆漿", c: "protein", g2s: 190 },
@@ -79,10 +80,10 @@ const GRAM_STEPS = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140,
 
 /* one-tap meal combos (serv pre-computed from exchange table) */
 const COMBOS = [
-  { emojis: ["🍚", "🥚", "🫘", "🥜"], label: "米糊40＋蛋1＋豆漿200＋花生醬20", items: [
-    { e: "🍚", n: "米糊", c: "carb", serv: 2, amount: 40, unit: "克" },
+  { emojis: ["🌾", "🥚", "🥛", "🥜"], label: "燕麥40＋蛋1＋牛奶240＋花生醬20", items: [
+    { e: "🌾", n: "燕麥", c: "carb", serv: 2, amount: 40, unit: "克" },
     { e: "🥚", n: "蛋", c: "protein", serv: 1, amount: 1, unit: "份" },
-    { e: "🫘", n: "豆漿", c: "protein", serv: 1, amount: 200, unit: "克" },
+    { e: "🥛", n: "牛奶", c: "dairy", serv: 1, amount: 240, unit: "克" },
     { e: "🥜", n: "花生醬", c: "fat", serv: 2, amount: 20, unit: "克" },
   ]},
   { emojis: ["🍗", "🥦"], label: "雞胸肉90＋蔬菜200", items: [
@@ -778,11 +779,12 @@ function App() {
 
                             {/* water */}
               <div style={{ ...card, borderRadius: 20, padding: "16px 8px" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <div style={{ width: 80, flex: "none", boxSizing: "border-box", paddingLeft: 8, display: "flex", alignItems: "center", gap: 4, fontSize: 12, fontWeight: 700, color: INK, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
-                    <span style={{ fontSize: 16 }}>💧</span>{st.water}ml
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <div style={{ width: 80, flex: "none", boxSizing: "border-box", paddingLeft: 8, display: "flex", alignItems: "center", gap: 6, fontSize: 14, fontWeight: 600, color: INK, whiteSpace: "nowrap" }}>
+                    <span style={{ fontSize: 16 }}>💧</span>飲水
                   </div>
                   <div style={{ flex: "none" }}><CellRow cells={waterCells} /></div>
+                  <span style={{ marginLeft: "auto", paddingRight: 8, fontSize: 11, color: MUTED, fontWeight: 700, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{st.water}ml</span>
                 </div>
               </div>
 
