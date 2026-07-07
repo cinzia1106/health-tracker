@@ -551,7 +551,7 @@ function App() {
       const d = new Date(ws); d.setDate(ws.getDate() + i);
       const k = keyOf(d);
       const v = k === st.dayKey ? (parseFloat(st.weight) || null) : (st.history[k]?.weight ?? null);
-      L.push(`${d.getMonth() + 1}/${d.getDate()}：${v != null ? fmt(v) : "—"}`);
+      L.push(`${d.getMonth() + 1}/${d.getDate()}：${v != null ? v.toFixed(2) : "—"}`);
       if (v != null) { sum += v; c++; }
     }
     L.push(`七日平均體重：${c ? (sum / c).toFixed(2) : "—"}`);
@@ -685,7 +685,7 @@ function App() {
     for (let i = 0; i < 7; i++) {
       const d = new Date(ws); d.setDate(ws.getDate() + i); const k = keyOf(d);
       const v = k === st.dayKey ? (parseFloat(st.weight) || null) : (st.history[k]?.weight ?? null);
-      weekWeights.push({ date: `${d.getMonth() + 1}/${d.getDate()}`, val: v != null ? fmt(v) : "—" });
+      weekWeights.push({ date: `${d.getMonth() + 1}/${d.getDate()}`, val: v != null ? v.toFixed(2) : "—" });
       if (v != null) { sum += v; c++; }
     }
     weekWeights.avg = c ? (sum / c).toFixed(2) + " kg" : "—";
