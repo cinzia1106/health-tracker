@@ -452,8 +452,12 @@ function App() {
       portions = {};
       CATS.forEach((c) => { portions[c.key] = Math.round(((m.portions[c.key] || 0) * factor) * 100) / 100; });
     }
-    setMealsFor(mDate, mealsFor(mDate).map((x) => (x.id === m.id ? { ...x, amount, portions, time: t } : x)));
-    toast(`已更新 ${m.name}`);
+    setMealsFor(mDate, mealsFor(mDate).map((x) => {
+      if (x.id === m.id) return { ...x, amount, portions, time: t };
+      if (changedTime && x.type === m.type) return { ...x, time: t };
+      return x;
+    }));
+    toast(changedTime ? `已更新 ${m.type}時間 ${t}` : `已更新 ${m.name}`);
   };
   const copyLunchToDinner = () => {
     const list = mealsFor(mDate);
@@ -1004,15 +1008,13 @@ function App() {
                         {showHeader && (
                           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 0 4px" }}>
                             <span style={{ fontSize: 11.5, fontWeight: 800, color: ts.fg, background: ts.bg, padding: "3px 10px", borderRadius: 8 }}>{m.type}</span>
+                            <span style={{ fontSize: 12, color: MUTED, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{m.time}</span>
                             <div style={{ flex: 1, borderTop: `1px solid ${BORDER}` }} />
                           </div>
                         )}
                         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderTop: showHeader ? "none" : `1px solid ${BTN_BG}` }}>
                           <span style={{ fontSize: 23 }}>{m.emoji}</span>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: 15, fontWeight: 600, color: INK, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</div>
-                            <div style={{ fontSize: 12, color: MUTED }}>{m.time}</div>
-                          </div>
+                          <div style={{ flex: 1, minWidth: 0, fontSize: 15, fontWeight: 600, color: INK, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</div>
                           {editId === m.id ? (
                             <span style={{ display: "flex", alignItems: "center", gap: 4, flex: "none" }}>
                               <input type="time" value={editTime}
