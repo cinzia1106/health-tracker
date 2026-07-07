@@ -400,17 +400,19 @@ function App() {
     return { ...s, history: h };
   });
   const newId = () => Date.now() + Math.random().toString(36).slice(2, 5);
+  const groupTime = (dk, type) => { const g = mealsFor(dk).find((x) => x.type === type); return g ? g.time : null; };
   const addFood = (f) => {
     const val = parseFloat(st.foodAmt) || 0;
     if (val <= 0) return;
     const unit = st.foodUnit;
     const sm = f.sm || 1;
+    const time = groupTime(mDate, st.mealType) || st.mealTime || nowTime();
     // amount=食物份（顯示用）；serv=營養素份（格子用）
     const foodServ = unit === "克" ? Math.round((val / f.g2s) * 2) / 2 : val;
     const serv = Math.round((foodServ * sm) * 100) / 100;
     const portions = Object.fromEntries(CATS.map((c) => [c.key, 0]));
     portions[f.c] = serv;
-    const entry = { id: newId(), type: st.mealType, time: st.mealTime || nowTime(), name: f.n, emoji: f.e, portions, amount: val, unit };
+    const entry = { id: newId(), type: st.mealType, time, name: f.n, emoji: f.e, portions, amount: val, unit };
     setMealsFor(mDate, [entry, ...mealsFor(mDate)]);
     toast(`已加入 ${f.e} ${f.n}　${val} ${unit}`);
   };
@@ -421,14 +423,15 @@ function App() {
     const serv = unit === "克" ? Math.round((st.customServ / 100) * 2) / 2 : st.customServ;
     const portions = Object.fromEntries(CATS.map((c) => [c.key, 0]));
     portions[st.customCat] = serv;
-    const entry = { id: newId(), type: st.mealType, time: st.mealTime || nowTime(), name: st.customName.trim(), emoji: cat.emoji, portions, amount: st.customServ, unit };
+    const time = groupTime(mDate, st.mealType) || st.mealTime || nowTime();
+    const entry = { id: newId(), type: st.mealType, time, name: st.customName.trim(), emoji: cat.emoji, portions, amount: st.customServ, unit };
     update((s) => ({ ...s, customName: "" }));
     setMealsFor(mDate, [entry, ...mealsFor(mDate)]);
     toast(`已加入 ${entry.name}`);
   };
   const delMeal = (m) => setMealsFor(mDate, mealsFor(mDate).filter((x) => x.id !== m.id));
   const addCombo = (combo) => {
-    const time = st.mealTime || nowTime();
+    const time = groupTime(mDate, st.mealType) || st.mealTime || nowTime();
     const entries = combo.items.map((it) => {
       const portions = Object.fromEntries(CATS.map((c) => [c.key, 0]));
       portions[it.c] = it.serv;
@@ -463,7 +466,7 @@ function App() {
     const list = mealsFor(mDate);
     const lunch = list.filter((x) => x.type === "午餐");
     if (!lunch.length) { toast("這天還沒有午餐紀錄"); return; }
-    const dinnerTime = "17:00";
+    const dinnerTime = groupTime(mDate, "晚餐") || "17:00";
     const copies = lunch.map((x) => ({ ...x, id: newId(), type: "晚餐", time: dinnerTime, portions: { ...x.portions } }));
     setMealsFor(mDate, [...copies, ...list]);
     toast(`晚餐＝午餐　已複製 ${lunch.length} 項`);
@@ -488,7 +491,7 @@ function App() {
       const d = new Date(k + "T00:00:00");
       const groups = {}, order = [];
       sortMeals(h.meals || []).forEach((m) => {
-        const gk = m.time + "|" + m.type;
+        const gk = m.type;
         if (!groups[gk]) { groups[gk] = { time: m.time, type: m.type, items: [], p: Object.fromEntries(CATS.map((c) => [c.key, 0])) }; order.push(gk); }
         groups[gk].items.push(m.amount != null ? m.name + fmt(m.amount) + (m.unit || "") : m.name);
         CATS.forEach((c) => { groups[gk].p[c.key] += m.portions[c.key] || 0; });
@@ -536,7 +539,7 @@ function App() {
     const abbr = { 早餐: "早", 午餐: "午", 晚餐: "晚", 加餐: "加餐", 訓前: "訓前", 訓後: "訓後" };
     const groups = {}, order = [];
     sortMeals(st.meals).forEach((m) => {
-      const k = m.time + "|" + m.type;
+      const k = m.type;
       if (!groups[k]) { groups[k] = { time: m.time, type: m.type, items: [] }; order.push(k); }
       groups[k].items.push(m.amount != null ? m.name + fmt(m.amount) + (m.unit || "") : m.name);
     });
