@@ -62,7 +62,7 @@ const REST = { carb: 5, protein: 10, dairy: 1, fruit: 1, veg: 4, whey: 1, fat: 5
 const FOODS = [
   { e: "🍚", n: "米糊", c: "carb", g2s: 20 },
   { e: "🍠", n: "地瓜", c: "carb", g2s: 55 },
-  { e: "🍙", n: "飯糰", c: "carb", g2s: 31 },
+  { e: "🍙", n: "飯糰", c: "carb", g2s: 62, sm: 2 },
   { e: "🍗", n: "雞胸肉", c: "protein", g2s: 30 },
   { e: "🥚", n: "蛋", c: "protein", g2s: 55 },
   { e: "🫘", n: "豆漿", c: "protein", g2s: 190 },
@@ -404,7 +404,10 @@ function App() {
     const val = parseFloat(st.foodAmt) || 0;
     if (val <= 0) return;
     const unit = st.foodUnit;
-    const serv = unit === "克" ? Math.round((val / f.g2s) * 2) / 2 : val;
+    const sm = f.sm || 1;
+    // amount=食物份（顯示用）；serv=營養素份（格子用）
+    const foodServ = unit === "克" ? Math.round((val / f.g2s) * 2) / 2 : val;
+    const serv = Math.round((foodServ * sm) * 100) / 100;
     const portions = Object.fromEntries(CATS.map((c) => [c.key, 0]));
     portions[f.c] = serv;
     const entry = { id: newId(), type: st.mealType, time: st.mealTime || nowTime(), name: f.n, emoji: f.e, portions, amount: val, unit };
