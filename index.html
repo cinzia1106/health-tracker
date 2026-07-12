@@ -174,6 +174,7 @@ const DEFAULT_STATE = {
   ...emptyDaily(),
   mealType: "早餐", mealTime: "", foodUnit: "份", foodAmt: 1,
   mealDate: "",
+  todayDate: "",
   customName: "", customServ: 1, customCat: "protein", customUnit: "份",
   planWeek: 1, planDay: 0,
   measure: { hip: "", navelMid: "", navelUp: "", navelDown: "", gripR: "", gripL: "" },
@@ -341,6 +342,7 @@ function App() {
     loadState().then((s) => {
       if (!s.mealTime) s.mealTime = nowTime();
       s.mealDate = todayKey();
+      s.todayDate = todayKey();
       setSt(s);
       saveState(s);
     });
@@ -391,7 +393,7 @@ function App() {
   const now = new Date();
 
   /* ---------- meal ops (date-aware) ---------- */
-  const mDate = st.mealDate || st.dayKey;
+  const mDate = st.todayDate || st.dayKey;
   const mealsFor = (dk) => (dk === st.dayKey ? st.meals : (((st.history[dk] || {}).meals) || []));
   const setMealsFor = (dk, meals) => update((s) => {
     if (dk === s.dayKey) return { ...s, meals };
@@ -527,18 +529,20 @@ function App() {
   /* ---------- reports ---------- */
   const buildReport = () => {
     const L = [];
-    L.push(`${now.getMonth() + 1}/${now.getDate()}（${WEEKDAYS[now.getDay()]}）`);
-    L.push(`體重：${st.weight || "—"}`);
-    L.push(`水量：水${st.water}`);
-    L.push(`步數：${st.steps || 0}`);
-    const focus = PLAN_DAYS[st.planDay || 0].focus;
-    const train = isT ? `${focus}${st.cardioDone ? `+${st.cardioMin || 30}有氧` : ""}` : "休息";
+    const rd = new Date(tDate + "T00:00:00");
+    const train = isToday
+      ? (dayRec.dayType === "training" ? `${PLAN_DAYS[st.planDay || 0].focus}${st.cardioDone ? `+${st.cardioMin || 30}有氧` : ""}` : "休息")
+      : (((st.history[tDate] || {}).train) || (dayRec.dayType === "training" ? "" : "休息"));
+    L.push(`${rd.getMonth() + 1}/${rd.getDate()}（${WEEKDAYS[rd.getDay()]}）`);
+    L.push(`體重：${dayRec.weight || "—"}`);
+    L.push(`水量：水${dayRec.water || 0}`);
+    L.push(`步數：${dayRec.steps || 0}`);
     L.push(`訓練：${train}`);
-    L.push(`睡眠：${st.sleep || "—"}小時`);
-    L.push(`排便：${st.bowel}次`);
+    L.push(`睡眠：${dayRec.sleep || "—"}小時`);
+    L.push(`排便：${dayRec.bowel || 0}次`);
     const abbr = { 早餐: "早", 午餐: "午", 晚餐: "晚", 加餐: "加餐", 訓前: "訓前", 訓後: "訓後" };
     const groups = {}, order = [];
-    sortMeals(st.meals).forEach((m) => {
+    sortMeals(mealsFor(tDate)).forEach((m) => {
       const k = m.type;
       if (!groups[k]) { groups[k] = { time: m.time, type: m.type, items: [] }; order.push(k); }
       groups[k].items.push(m.amount != null ? m.name + fmt(m.amount) + (m.unit || "") : m.name);
@@ -549,7 +553,8 @@ function App() {
   };
   const buildWeekReport = () => {
     const m = st.measure; const L = []; let sum = 0, c = 0;
-    const ws = new Date(now); ws.setDate(now.getDate() - now.getDay()); // Sunday = week start
+    const tD0 = new Date(tDate + "T00:00:00");
+    const ws = new Date(tD0); ws.setDate(tD0.getDate() - tD0.getDay()); // Sunday = week start
     for (let i = 0; i < 7; i++) {
       const d = new Date(ws); d.setDate(ws.getDate() + i);
       const k = keyOf(d);
@@ -571,8 +576,8 @@ function App() {
   };
   const buildTSV = () => {
     const h = ["日期", "類型", "體重", "睡眠", "步數", "飲水", "排便"];
-    const v = [st.dayKey, isT ? "訓練日" : "休息日", st.weight || "", st.sleep || "", st.steps || "", st.water, st.bowel];
-    CATS.forEach((c) => { h.push(c.name); v.push(fmt(consumed[c.key] || 0) + "/" + tg[c.key]); });
+    const v = [tDate, dayRec.dayType === "training" ? "訓練日" : "休息日", dayRec.weight || "", dayRec.sleep || "", dayRec.steps || "", dayRec.water || 0, dayRec.bowel || 0];
+    CATS.forEach((c) => { h.push(c.name); v.push(fmt(tCons[c.key] || 0) + "/" + tTg[c.key]); });
     return h.join("\t") + "\n" + v.join("\t");
   };
   const copy = (text, label) => {
@@ -644,16 +649,50 @@ function App() {
       }
     }
   }
+  /* today-page date-aware record */
+  const tDate = st.todayDate || st.dayKey;
+  const isToday = tDate === st.dayKey;
+  const dayRec = isToday
+    ? { weight: st.weight, sleep: st.sleep, steps: st.steps, bowel: st.bowel, water: st.water, dayType: st.dayType, cardioDone: st.cardioDone, cardioMin: st.cardioMin }
+    : (() => { const h = st.history[tDate] || {}; return { weight: h.weight != null ? String(h.weight) : "", sleep: h.sleep != null ? String(h.sleep) : "", steps: h.steps != null ? String(h.steps) : "", bowel: h.bowel || 0, water: h.water || 0, dayType: h.dayType || "training", cardioDone: (h.cardio || 0) > 0, cardioMin: String(h.cardio || 30) }; })();
+  const setW = (field, val) => {
+    if (isToday) {
+      if (field === "weight") update((s) => ({ ...s, weight: val, history: patchHist(s, { weight: parseFloat(val) || null }) }));
+      else if (field === "steps") update((s) => ({ ...s, steps: val, history: patchHist(s, { steps: parseInt(val) || null }) }));
+      else if (field === "water") update((s) => ({ ...s, water: val, history: patchHist(s, { water: val }) }));
+      else update({ [field]: val });
+      return;
+    }
+    update((s) => {
+      const h = { ...s.history };
+      const r = { ...(h[tDate] || {}) };
+      if (field === "weight") r.weight = parseFloat(val) || null;
+      else if (field === "sleep") r.sleep = parseFloat(val) || null;
+      else if (field === "steps") r.steps = parseInt(val) || null;
+      else if (field === "bowel") r.bowel = val;
+      else if (field === "water") r.water = val;
+      else if (field === "dayType") r.dayType = val;
+      else if (field === "cardioDone") r.cardio = val ? (parseInt(r.cardio) > 0 ? parseInt(r.cardio) : 30) : 0;
+      else if (field === "cardioMin") { if ((r.cardio || 0) > 0) r.cardio = parseInt(val) || 0; }
+      const hasFocus = r.train && r.train !== "休息";
+      const focus = hasFocus ? String(r.train).split("+")[0] : PLAN_DAYS[s.planDay || 0].focus;
+      r.train = (r.dayType || "training") === "training" ? (focus + ((r.cardio || 0) > 0 ? `+${r.cardio}有氧` : "")) : "休息";
+      h[tDate] = r;
+      return { ...s, history: h };
+    });
+  };
+  const tCons = consFor(tDate);
+  const tTg = dayRec.dayType === "training" ? TRAIN : REST;
 
   /* ---------- water cells ---------- */
   const wTarget = Math.ceil(WATER_GOAL / WATER_CELL);
-  const wFilled = Math.floor(st.water / WATER_CELL);
+  const wFilled = Math.floor((dayRec.water || 0) / WATER_CELL);
   const waterCells = [];
   for (let i = 0; i < wTarget; i++) {
     const L = (i + 1) * WATER_CELL;
     waterCells.push({
       frac: i < wFilled ? 1 : 0, over: false,
-      onClick: () => update((s) => { const v = s.water === L ? L - WATER_CELL : L; return { ...s, water: v, history: patchHist(s, { water: v }) }; }),
+      onClick: () => setW("water", (dayRec.water || 0) === L ? L - WATER_CELL : L),
     });
   }
 
@@ -684,9 +723,11 @@ function App() {
 
   const weekWeights = [];
   { let sum = 0, c = 0;
-    const ws = new Date(now); ws.setDate(now.getDate() - now.getDay()); // Sunday = week start
+    const tD0 = new Date(tDate + "T00:00:00");
+    const ws = new Date(tD0); ws.setDate(tD0.getDate() - tD0.getDay()); // Sunday = week start
     for (let i = 0; i < 7; i++) {
       const d = new Date(ws); d.setDate(ws.getDate() + i); const k = keyOf(d);
+
       const v = k === st.dayKey ? (parseFloat(st.weight) || null) : (st.history[k]?.weight ?? null);
       weekWeights.push({ date: `${d.getMonth() + 1}/${d.getDate()}`, val: v != null ? v.toFixed(2) : "—" });
       if (v != null) { sum += v; c++; }
@@ -718,41 +759,42 @@ function App() {
               <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", margin: "6px 2px 16px" }}>
                 <div>
                   <div style={titleStyle}>今日</div>
-                  <div style={{ fontSize: 13, color: MUTED, marginTop: 2 }}>{now.getMonth() + 1}月{now.getDate()}日 週{WEEKDAYS[now.getDay()]}</div>
+                  <input type="date" value={tDate} onChange={(e) => update({ todayDate: e.target.value || todayKey() })}
+                    style={{ border: "none", background: "transparent", fontSize: 13, color: isToday ? MUTED : "#B0763F", fontWeight: 600, padding: 0, marginTop: 2, fontFamily: "inherit", WebkitAppearance: "none", appearance: "none" }} />
                 </div>
                 <div style={{ display: "flex", background: BORDER, borderRadius: 12, padding: 3 }}>
-                  <button onClick={() => update({ dayType: "training" })} style={segBtn(isT)}>🔥 訓練日</button>
-                  <button onClick={() => update({ dayType: "rest" })} style={segBtn(!isT)}>🌙 休息日</button>
+                  <button onClick={() => setW("dayType", "training")} style={segBtn(dayRec.dayType === "training")}>🔥 訓練日</button>
+                  <button onClick={() => setW("dayType", "rest")} style={segBtn(dayRec.dayType !== "training")}>🌙 休息日</button>
                 </div>
               </div>
 
               <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 8, margin: "0 0 14px" }}>
                 <MetricCard emoji="😴" label="睡眠">
                   <div>
-                    <input type="number" step="0.1" inputMode="decimal" value={st.sleep} placeholder="0" style={bigInput}
-                      onChange={(e) => update({ sleep: e.target.value })} />
-                    <div style={{ fontSize: 10.5, color: MUTED, fontWeight: 600 }}>/ 8 小時 {sleepMet ? "✓" : ""}</div>
+                    <input type="number" step="0.1" inputMode="decimal" value={dayRec.sleep} placeholder="0" style={bigInput}
+                      onChange={(e) => setW("sleep", e.target.value)} />
+                    <div style={{ fontSize: 10.5, color: MUTED, fontWeight: 600 }}>/ 8 小時 {(parseFloat(dayRec.sleep) || 0) >= 8 ? "✓" : ""}</div>
                   </div>
                 </MetricCard>
                 <MetricCard emoji="⚖️" label="體重">
                   <div>
-                    <input type="number" step="0.1" inputMode="decimal" value={st.weight} placeholder="—" style={bigInput}
-                      onChange={(e) => update((s) => ({ ...s, weight: e.target.value, history: patchHist(s, { weight: parseFloat(e.target.value) || null }) }))} />
+                    <input type="number" step="0.1" inputMode="decimal" value={dayRec.weight} placeholder="—" style={bigInput}
+                      onChange={(e) => setW("weight", e.target.value)} />
                     <div style={{ fontSize: 10.5, color: MUTED, fontWeight: 600 }}>{lastWeight != null ? `上次 ${fmt(lastWeight)} kg` : "無上次紀錄"}</div>
                   </div>
                 </MetricCard>
                 <MetricCard emoji="👟" label="步數">
                   <div>
-                    <input type="number" inputMode="numeric" value={st.steps} placeholder="0" style={bigInput}
-                      onChange={(e) => update((s) => ({ ...s, steps: e.target.value, history: patchHist(s, { steps: parseInt(e.target.value) || null }) }))} />
-                    <div style={{ fontSize: 10.5, color: MUTED, fontWeight: 600 }}>/ {STEP_GOAL.toLocaleString()} 步 {stepsNum >= STEP_GOAL ? "🎉" : ""}</div>
+                    <input type="number" inputMode="numeric" value={dayRec.steps} placeholder="0" style={bigInput}
+                      onChange={(e) => setW("steps", e.target.value)} />
+                    <div style={{ fontSize: 10.5, color: MUTED, fontWeight: 600 }}>/ {STEP_GOAL.toLocaleString()} 步 {(parseInt(dayRec.steps) || 0) >= STEP_GOAL ? "🎉" : ""}</div>
                   </div>
                 </MetricCard>
                 <MetricCard emoji="💩" label="排便次數">
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <button style={stepperBtn} onClick={() => update((s) => ({ ...s, bowel: Math.max(0, s.bowel - 1) }))}>−</button>
-                    <span style={{ fontSize: 24, fontWeight: 800, color: INK, fontVariantNumeric: "tabular-nums" }}>{st.bowel}</span>
-                    <button style={stepperBtn} onClick={() => update((s) => ({ ...s, bowel: s.bowel + 1 }))}>＋</button>
+                    <button style={stepperBtn} onClick={() => setW("bowel", Math.max(0, (dayRec.bowel || 0) - 1))}>−</button>
+                    <span style={{ fontSize: 24, fontWeight: 800, color: INK, fontVariantNumeric: "tabular-nums" }}>{dayRec.bowel}</span>
+                    <button style={stepperBtn} onClick={() => setW("bowel", (dayRec.bowel || 0) + 1)}>＋</button>
                   </div>
                 </MetricCard>
               </div>
@@ -761,7 +803,7 @@ function App() {
               <div style={{ ...card, borderRadius: 20 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "0 0 16px" }}>
                   <div style={{ fontSize: 15, fontWeight: 600, color: INK }}>🍱 營養份數</div>
-                  <span style={{ fontSize: 12, color: MUTED, fontWeight: 700 }}>{isT ? "訓練日" : "休息日"}目標</span>
+                  <span style={{ fontSize: 12, color: MUTED, fontWeight: 700 }}>{dayRec.dayType === "training" ? "訓練日" : "休息日"}目標</span>
                 </div>
                 {["carb", "protein", "fat", "veg"].map((key) => {
                   const c = CATS.find((x) => x.key === key);
@@ -770,7 +812,7 @@ function App() {
                       <div style={{ width: 72, flex: "none", display: "flex", alignItems: "center", gap: 6, fontSize: 14, fontWeight: 600, color: INK, paddingTop: 1, whiteSpace: "nowrap" }}>
                         <span style={{ fontSize: 16 }}>{c.emoji}</span>{c.name}
                       </div>
-                      <div style={{ flex: 1 }}><CellRow cells={buildCatCells(key)} /></div>
+                      <div style={{ flex: 1 }}><CellRow cells={buildCatCells(key, tCons, tTg)} /></div>
                     </div>
                   );
                 })}
@@ -780,7 +822,7 @@ function App() {
                     <span style={{ fontSize: 15 }}>🥛</span>乳製品
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                    {secRow.map((cell, i) => cell.gap
+                    {secRowFor(tCons, tTg).map((cell, i) => cell.gap
                       ? <div key={i} style={{ width: 0, height: 20, flex: "none", borderLeft: "1px solid transparent", margin: "0 2px" }} />
                       : <Cell key={i} {...cell} />)}
                   </div>
@@ -821,7 +863,7 @@ function App() {
               </div>
 
               {/* today's training (training day only) */}
-              {isT && (
+              {dayRec.dayType === "training" && (
                 <div style={{ ...card, borderRadius: 20 }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 15, fontWeight: 700, color: INK }}><span style={{ fontSize: 17 }}>🏋️</span>今日訓練</div>
@@ -832,13 +874,13 @@ function App() {
                       <button key={idx} onClick={() => update({ planDay: idx })} style={dayBtnStyle(idx)}>Day {idx + 1}</button>
                     ))}
                   </div>
-                  <div onClick={() => update((s) => ({ ...s, cardioDone: !s.cardioDone }))}
-                    style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "nowrap", background: st.cardioDone ? "#E7F0EA" : SOFT, borderRadius: 10, padding: "9px 10px", marginBottom: 14, cursor: "pointer", transition: "background .2s" }}>
-                    <div style={{ width: 20, height: 20, flex: "none", borderRadius: 6, border: `2px solid ${st.cardioDone ? A : MUTED}`, background: st.cardioDone ? A : "transparent", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800, boxSizing: "border-box" }}>{st.cardioDone ? "✓" : ""}</div>
+                  <div onClick={() => setW("cardioDone", !dayRec.cardioDone)}
+                    style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "nowrap", background: dayRec.cardioDone ? "#E7F0EA" : SOFT, borderRadius: 10, padding: "9px 10px", marginBottom: 14, cursor: "pointer", transition: "background .2s" }}>
+                    <div style={{ width: 20, height: 20, flex: "none", borderRadius: 6, border: `2px solid ${dayRec.cardioDone ? A : MUTED}`, background: dayRec.cardioDone ? A : "transparent", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800, boxSizing: "border-box" }}>{dayRec.cardioDone ? "✓" : ""}</div>
                     <span style={{ fontSize: 12, color: SUB, fontWeight: 600, whiteSpace: "nowrap", flex: "none" }}>🏃 有氧</span>
-                    <input type="number" inputMode="numeric" value={st.cardioMin}
+                    <input type="number" inputMode="numeric" value={dayRec.cardioMin}
                       onClick={(e) => e.stopPropagation()}
-                      onChange={(e) => update({ cardioMin: e.target.value })}
+                      onChange={(e) => setW("cardioMin", e.target.value)}
                       style={{ width: 28, flex: "none", border: "none", borderBottom: `1.5px solid ${BORDER}`, background: "transparent", fontSize: 12, fontWeight: 700, color: INK, textAlign: "center", padding: 0, fontFamily: "inherit" }} />
                     <span style={{ fontSize: 11.5, color: SUB, fontWeight: 600, whiteSpace: "nowrap", flex: "none" }}>分 · 心率120-130</span>
                     <button onClick={(e) => { e.stopPropagation(); update({ planWeek: (planWeek % 3) + 1 }); }}
@@ -864,7 +906,11 @@ function App() {
           {/* ===================== 記餐 ===================== */}
           {tab === "meal" && (
             <div style={{ position: "relative" }}>
-              <div style={{ margin: "6px 2px 16px" }}><div style={titleStyle}>記餐</div></div>
+              <div style={{ margin: "6px 2px 16px" }}>
+                <div style={titleStyle}>記餐</div>
+                <input type="date" value={mDate} onChange={(e) => update({ todayDate: e.target.value || todayKey() })}
+                  style={{ border: "none", background: "transparent", fontSize: 13, color: mDate === st.dayKey ? MUTED : "#B0763F", fontWeight: 600, padding: 0, marginTop: 2, fontFamily: "inherit", WebkitAppearance: "none", appearance: "none" }} />
+              </div>
 
               <div style={{ ...card, borderRadius: 20, padding: 14 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "0 0 12px" }}>
@@ -902,11 +948,6 @@ function App() {
                   ))}
                 </div>
                 <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
-                  <div style={{ flex: "1 1 130px", minWidth: 0 }}>
-                    <div style={{ ...secLabel, marginBottom: 6 }}>日期</div>
-                    <input type="date" value={mDate} onChange={(e) => update({ mealDate: e.target.value || todayKey() })}
-                      style={{ ...inputBase, width: "100%", boxSizing: "border-box", minWidth: 0, padding: "9px 10px", WebkitAppearance: "none", appearance: "none", color: mDate === st.dayKey ? INK : "#B0763F" }} />
-                  </div>
                   <div style={{ flex: "1 1 130px", minWidth: 0 }}>
                     <div style={{ ...secLabel, marginBottom: 6 }}>時間</div>
                     <input type="time" value={st.mealTime} onChange={(e) => update({ mealTime: e.target.value })}
@@ -1104,7 +1145,11 @@ function App() {
           {/* ===================== 回報 ===================== */}
           {tab === "report" && (
             <div>
-              <div style={{ margin: "6px 2px 16px" }}><div style={titleStyle}>回報</div></div>
+              <div style={{ margin: "6px 2px 16px" }}>
+                <div style={titleStyle}>回報</div>
+                <input type="date" value={tDate} onChange={(e) => update({ todayDate: e.target.value || todayKey() })}
+                  style={{ border: "none", background: "transparent", fontSize: 13, color: isToday ? MUTED : "#B0763F", fontWeight: 600, padding: 0, marginTop: 2, fontFamily: "inherit", WebkitAppearance: "none", appearance: "none" }} />
+              </div>
 
               <div style={card}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
